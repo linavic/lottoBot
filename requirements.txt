@@ -1,1 +1,1 @@
-aiogram<3.0python-dotenvrequestspandasnumpyopenpyxl
+aiogram==2.25.1python-dotenvrequestspandasnumpyopenpyxlaiohttp
