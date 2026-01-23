@@ -1,0 +1,1 @@
+from aiohttp import webimport osasync def handle(request):    return web.Response(text="Bot is alive!")app = web.Application()app.router.add_get('/', handle)def start_server():    port = int(os.environ.get("PORT", 8080))    return app, port
