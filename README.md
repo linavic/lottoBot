@@ -1,0 +1,2 @@
+# lottoBot
+lotto bot 
