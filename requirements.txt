@@ -1,1 +1,9 @@
-aiogram<3.0python-dotenvrequestsopenpyxlpandasnumpyaiohttp
+aiogram<3.0
+python-dotenv
+requests
+pandas
+numpy
+openpyxl
+aiohttp
+sqlalchemy
+psycopg2-binary
