@@ -1,6 +1,7 @@
 import os
 import json
 
+# ניהול זיכרון פשוט בקובץ JSON
 DB_FILE = "users_db.json"
 
 async def get_user_data(user_id):
@@ -16,10 +17,7 @@ async def get_user_data(user_id):
         data = {}
     
     if user_id not in data:
-        data[user_id] = {
-            "has_used_free": False,
-            "is_premium": False
-        }
+        data[user_id] = {"has_used_free": False, "is_premium": False}
         with open(DB_FILE, 'w') as f:
             json.dump(data, f)
             
@@ -35,7 +33,7 @@ async def update_user_data(user_id, updates):
         
     if user_id not in data:
         data[user_id] = {"has_used_free": False, "is_premium": False}
-        
+    
     data[user_id].update(updates)
         
     with open(DB_FILE, 'w') as f:
