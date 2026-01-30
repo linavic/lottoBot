@@ -1,7 +1,7 @@
 import os
 import json
 
-# ניהול זיכרון פשוט בקובץ JSON
+# ניהול זיכרון פשוט בקובץ (עד שנחליט לעבור ל-SQL)
 DB_FILE = "users_db.json"
 
 async def get_user_data(user_id):
