@@ -7,14 +7,16 @@ from aiogram.utils import executor
 from dotenv import load_dotenv
 from datetime import datetime
 
-# ייבוא מהקבצים שלך
+# ייבוא מהקבצים המקומיים
 from database_manager import get_user_data, update_user_data, user_agreed_to_terms
 from keep_alive import start_server
 
 load_dotenv()
 
 API_TOKEN = os.getenv('TELEGRAM_API_TOKEN')
-BASE_PAYMENT_URL = os.getenv('PAYMENT_LINK', 'https://www.paypal.com')
+# הלינק המעודכן עם ה-Plan ID שראיתי בתמונה שלך
+PLAN_ID = "P-39U78069VC411525WNF64WEA"
+BASE_PAYMENT_URL = f"https://www.paypal.com/billing/subscriptions/subscribe?plan_id={PLAN_ID}"
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
@@ -23,19 +25,17 @@ dp = Dispatcher(bot)
 # --- תוכן שיווקי ומשפטי ---
 DISCLAIMER_TEXT = (
     "⚠️ **כתב ויתור אחריות ותנאי שימוש** ⚠️\n\n"
-    "1. השימוש בבוט זה ובמידע המופק ממנו הוא על אחריות המשתמש בלבד.\n"
-    "2. המידע המופק מהאלגוריתם הינו בגדר המלצה סטטיסטית בלבד ואינו מבטיח זכייה.\n"
-    "3. הבוט, מפתחיו וכל גורם הקשור אליו אינם נושאים בכל אחריות (ישירה או עקיפה) "
-    "לכל נזק, הפסד כספי או אכזבה העלולים להיגרם מהשימוש בבוט.\n"
-    "4. מפעלי הלוטו הינם משחקי מזל. אנו ממליצים לשחק באחריות ובתקציב מוגדר מראש.\n\n"
-    "**המשך השימוש בבוט מהווה הסכמה מלאה ובלתי חוזרת לתנאים אלו.**"
+    "1. השימוש בבוט ובמידע המופק ממנו הוא על אחריות המשתמש בלבד.\n"
+    "2. המידע הינו המלצה סטטיסטית בלבד ואינו מבטיח זכייה בשום צורה.\n"
+    "3. הבוט, מפתחיו ובעליו אינם נושאים באחריות לכל נזק או הפסד כספי.\n"
+    "**המשך השימוש בבוט מהווה הסכמה מלאה לתנאים אלו.**"
 )
 
 MARKETING_STORY = (
     "🔬 **הטכנולוגיה שמאחורי המזל**\n\n"
-    "מערכת **LottoAI** פותחה על ידי צוות של טובי המתכנתים ומומחי סטטיסטיקה.\n"
-    "האלגוריתם הייחודי שלנו סורק עשרות אלפי הגרלות עבר, מנתח דפוסים ומשתמש "
-    "בנוסחאות מתמטיות מתקדמות כדי לזקק את הצירופים בעלי הפוטנציאל הגבוה ביותר."
+    "מערכת **LottoAI** פותחה על ידי צוות מתכנתים בכיר ומומחי סטטיסטיקה.\n"
+    "האלגוריתם הייחודי סורק עשרות אלפי הגרלות עבר ומזהה דפוסים הסתברותיים "
+    "כדי לזקק את הצירופים בעלי הפוטנציאל הגבוה ביותר."
 )
 
 def generate_algorithmic_lines():
@@ -53,12 +53,11 @@ async def send_welcome(message: types.Message):
     
     welcome_img = "https://images.unsplash.com/photo-1518133835878-5a93cc3f89e5?q=80&w=1000"
     
-    # בדיקה: האם המשתמש כבר אישר את התנאים?
     if not user.get('agreed_to_terms', False):
         text = (
             f"שלום {message.from_user.first_name}! 👋\n\n"
             "ברוך הבא ל-**LottoAI**.\n"
-            "לפני שנתחיל להשתמש בכוח של האלגוריתם, עליך לקרוא ולאשר את תנאי השימוש:\n\n"
+            "לפני שנתחיל, עליך לאשר את תנאי השימוש:\n\n"
             f"{DISCLAIMER_TEXT}"
         )
         keyboard = types.InlineKeyboardMarkup().add(
@@ -66,14 +65,13 @@ async def send_welcome(message: types.Message):
         )
         await bot.send_photo(message.chat.id, welcome_img, caption=text, parse_mode="Markdown", reply_markup=keyboard)
     else:
-        # אם כבר אישר - שלח לו את הודעת הברוך הבא השיווקית
         await show_main_menu(message.chat.id, message.from_user.first_name)
 
 async def show_main_menu(chat_id, name):
     text = (
-        f"שלום {name}! שמחים שחזרת. 🎰\n\n"
+        f"שלום {name}! 🎰\n\n"
         f"{MARKETING_STORY}\n\n"
-        "האלגוריתם מוכן לעבודה. מה תרצה לעשות?"
+        "האלגוריתם מוכן. מה תרצה לעשות?"
     )
     keyboard = types.InlineKeyboardMarkup(row_width=1).add(
         types.InlineKeyboardButton('🎰 הפק 10 שורות VIP', callback_data='get_lotto'),
@@ -85,7 +83,7 @@ async def show_main_menu(chat_id, name):
 async def process_agree(callback_query: types.CallbackQuery):
     user_id = str(callback_query.from_user.id)
     await user_agreed_to_terms(user_id)
-    await bot.answer_callback_query(callback_query.id, "התנאים אושרו בהצלחה!")
+    await bot.answer_callback_query(callback_query.id, "התנאים אושרו!")
     await bot.delete_message(callback_query.message.chat.id, callback_query.message.message_id)
     await show_main_menu(callback_query.message.chat.id, callback_query.from_user.first_name)
 
@@ -96,8 +94,6 @@ async def process_lotto(callback_query: types.CallbackQuery):
     
     if not user.get('has_used_free', False) or user.get('is_premium', False):
         results = generate_algorithmic_lines()
-        
-        # עדכון שימוש חינם אם רלוונטי
         if not user.get('is_premium', False):
             await update_user_data(user_id, {"has_used_free": True})
         
@@ -111,16 +107,15 @@ async def process_lotto(callback_query: types.CallbackQuery):
         
         if not user.get('is_premium', False):
             await asyncio.sleep(2)
-            promo = "🧐 רוצה לקבל תחזיות ללא הגבלה בכל הגרלה? הצטרף ל-VIP ב-10 ש\"ח בלבד!"
+            promo = "🧐 רוצה לקבל תחזיות לכל הגרלה ללא הגבלה? הצטרף ל-VIP ב-10 ש\"ח בלבד!"
             keyboard = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton('💳 למינוי VIP', callback_data='show_pay'))
             await bot.send_message(user_id, promo, reply_markup=keyboard)
     else:
         await show_payment_options(user_id)
 
 async def show_payment_options(user_id):
-    connector = "&" if "?" in BASE_PAYMENT_URL else "?"
-    url = f"{BASE_PAYMENT_URL}{connector}custom={user_id}"
-    text = "🛑 **מגבלת שימוש חינמי**\n\nכבר ניצלת את התחזית החינמית שלך. הצטרף למנוי ה-VIP כדי להמשיך."
+    url = f"{BASE_PAYMENT_URL}&custom={user_id}"
+    text = "🛑 **מגבלת שימוש חינמי**\n\nכבר ניצלת את התחזית החינמית. הצטרף ל-VIP כדי להמשיך."
     keyboard = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton('💳 מנוי VIP ב-10 ש"ח', url=url))
     await bot.send_message(user_id, text, reply_markup=keyboard, parse_mode="Markdown")
 
@@ -133,5 +128,5 @@ if __name__ == '__main__':
     server_app, port = start_server()
     loop = asyncio.get_event_loop()
     loop.create_task(executor.start_polling(dp, skip_updates=True))
-    # host='0.0.0.0' פותר את בעיית ה-Port ב-Render
+    # host='0.0.0.0' הכרחי ל-Render
     web.run_app(server_app, host='0.0.0.0', port=port)
