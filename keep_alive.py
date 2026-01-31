@@ -4,64 +4,43 @@ import json
 import logging
 from database_manager import set_user_premium
 
-# הגדרת לוגים כדי שנוכל לראות את ההודעות מפייפאל ב-Render Logs
 logging.basicConfig(level=logging.INFO)
 
 async def handle_home(request):
-    return web.Response(text="Bot Webhook Listener is Active!")
+    return web.Response(text="LottoAI Engine is Running...")
 
 async def handle_paypal_webhook(request):
-    """פונקציה שמקבלת את הודעת התשלום מפייפאל ומפעילה את המנוי"""
     try:
-        payload = await request.json()
-        event_type = payload.get('event_type')
-        logging.info(f"Received PayPal Event: {event_type}")
-
-        resource = payload.get('resource', {})
+        data = await request.json()
+        event_type = data.get('event_type')
+        resource = data.get('resource', {})
         
-        # פייפאל שולח את ה-ID של המשתמש בתוך שדה שנקרא custom_id
-        # אנחנו נגדיר בבוט לשלוח את ה-ID לשם
         user_id = resource.get('custom_id') or resource.get('custom')
-        
-        # במקרה של מנויים (Subscriptions), המזהה יכול להיות עמוק יותר
         if not user_id and 'subscriber' in resource:
             user_id = resource['subscriber'].get('custom_id')
 
-        # אירועים שמעידים על תשלום מוצלח
-        success_events = [
-            'PAYMENT.SALE.COMPLETED',
-            'BILLING.SUBSCRIPTION.ACTIVATED',
-            'BILLING.SUBSCRIPTION.CREATED'
-        ]
-
-        if user_id and event_type in success_events:
-            sub_id = resource.get('id')
-            expiry = await set_user_premium(user_id, sub_id)
-            logging.info(f"SUCCESS: User {user_id} upgraded to premium. Expires: {expiry}")
+        # אירועי הצלחה
+        if user_id and event_type in ['PAYMENT.SALE.COMPLETED', 'BILLING.SUBSCRIPTION.ACTIVATED']:
+            expiry = await set_user_premium(user_id, resource.get('id'))
             
-            # שליחת הודעה למשתמש בטלגרם (דרך הבוט)
+            # שליחת הודעה למשתמש
             from bot import bot
-            try:
-                await bot.send_message(
-                    user_id, 
-                    "✅ <b>התשלום התקבל בהצלחה!</b>\n\n"
-                    "המנוי שלך הופעל אוטומטית. מעכשיו יש לך גישה חופשית לכל התחזיות.\n"
-                    f"תוקף המנוי: {expiry}\n\n"
-                    "בהצלחה! 🍀",
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                logging.error(f"Could not notify user {user_id}: {e}")
+            msg = (
+                "🎊 **ברוכים הבאים לנבחרת ה-VIP!** 🎊\n\n"
+                "התשלום עבר בהצלחה. האלגוריתם נפתח עבורך ללא הגבלה.\n"
+                f"תוקף המנוי: {expiry}\n\n"
+                "צא לדרך ובהצלחה בהגרלה! 🍀"
+            )
+            await bot.send_message(user_id, msg, parse_mode="Markdown")
 
         return web.Response(text="OK", status=200)
     except Exception as e:
-        logging.error(f"Webhook Error: {e}")
+        logging.error(f"Webhook error: {e}")
         return web.Response(text="Error", status=400)
 
 def start_server():
     app = web.Application()
     app.router.add_get('/', handle_home)
-    # הכתובת שהגדרת בפייפאל: https://lottobot-lq4u.onrender.com/webhook/paypal
     app.router.add_post('/webhook/paypal', handle_paypal_webhook)
     port = int(os.environ.get("PORT", 8080))
     return app, port
