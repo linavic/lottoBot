@@ -7,7 +7,7 @@ logging.basicConfig(level=logging.INFO)
 
 async def handle_home(request):
     """דף בית ש-Render סורק כדי לוודא שהשרת חי"""
-    return web.Response(text="LottoAI Engine Core is Online and Port Binding is Active.")
+    return web.Response(text="LottoAI Engine is Online and Binding Successfully.")
 
 async def handle_paypal_webhook(request):
     """קבלת הודעות תשלום מפייפאל ושדרוג המשתמש"""
@@ -21,7 +21,7 @@ async def handle_paypal_webhook(request):
         if not user_id and 'subscriber' in resource:
             user_id = resource['subscriber'].get('custom_id')
 
-        logging.info(f"Received PayPal Webhook: {event_type} for User: {user_id}")
+        logging.info(f"PayPal Webhook: {event_type} for User: {user_id}")
 
         if user_id and event_type in ['PAYMENT.SALE.COMPLETED', 'BILLING.SUBSCRIPTION.ACTIVATED']:
             expiry = await set_user_premium(user_id, resource.get('id'))
@@ -30,7 +30,7 @@ async def handle_paypal_webhook(request):
                 "🎊 **התשלום אושר! המנוי שלך הופעל** 🎊\n\n"
                 "הגישה לאלגוריתם נפתחה עבורך ללא הגבלה.\n"
                 f"תוקף המנוי: {expiry}\n\n"
-                "צא לדרך ובהצלחה בהגרלה הקרובה! 🍀"
+                "צא לדרך ובהצלחה בהגרלה! 🍀"
             )
             await bot.send_message(user_id, msg, parse_mode="Markdown")
 
