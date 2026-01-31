@@ -7,7 +7,7 @@ from aiogram.utils import executor
 from dotenv import load_dotenv
 from datetime import datetime
 
-# ייבוא מהקבצים המקומיים
+# ייבוא מהקבצים המקומיים שלך
 from database_manager import get_user_data, update_user_data, user_agreed_to_terms
 from keep_alive import start_server
 
@@ -15,30 +15,31 @@ load_dotenv()
 
 API_TOKEN = os.getenv('TELEGRAM_API_TOKEN')
 
-# הקישור המדויק עם ה-Plan ID שלך
-PAYPAL_URL = "https://www.paypal.com/webapps/billing/plans/subscribe?plan_id=P-39U78069VC411525WNF64WEA"
+# הקישור המעודכן עם ה-Plan ID שקיבלת מפייפאל
+PLAN_ID = "P-39U78069VC411525WNF64WEA"
+PAYPAL_URL = f"https://www.paypal.com/webapps/billing/plans/subscribe?plan_id={PLAN_ID}"
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-# --- תוכן שיווקי ומשפטי ---
+# --- תוכן שיווקי ומשפטי (Disclaimer) ---
 DISCLAIMER_TEXT = (
     "⚠️ **כתב ויתור אחריות ותנאי שימוש** ⚠️\n\n"
-    "לפני השימוש במערכת LottoAI, עליך לאשר את התנאים הבאים:\n\n"
+    "לפני השימוש בבוט, עליך לאשר את התנאים הבאים:\n\n"
     "1. המידע המופק מהבוט הינו המלצה סטטיסטית בלבד המבוססת על אלגוריתם הסתברותי.\n"
     "2. אין במידע זה משום הבטחה לזכייה או הצלחה בהגרלות הלוטו.\n"
     "3. השימוש בבוט ובמספרים המופקים ממנו הוא על אחריות המשתמש בלבד.\n"
-    "4. הבוט, מפתחיו ובעליו אינם נושאים בכל אחריות לנזק או הפסד כספי.\n"
+    "4. הבוט, מפתחיו וכל גורם הקשור אליו אינם נושאים בכל אחריות לנזק או הפסד כספי.\n"
     "5. משחקי מזל מיועדים לבני 18 ומעלה. שחקו באחריות.\n\n"
     "**המשך השימוש מהווה הסכמה מלאה ובלתי חוזרת לתנאים אלו.**"
 )
 
 MARKETING_STORY = (
     "🔬 **הטכנולוגיה שמאחורי המזל**\n\n"
-    "אלגוריתם **LottoAI** הוא פרי פיתוח ייחודי של צוות מתכנתים בכיר ומומחי סטטיסטיקה.\n\n"
-    "באמצעות נוסחאות מתמטיות מתקדמות, המערכת סורקת עשרות אלפי הגרלות עבר, "
-    "מזהה דפוסים הסתברותיים נסתרים ומזקקת את הצירופים בעלי הפוטנציאל הגבוה ביותר לזכייה.\n\n"
+    "אלגוריתם **LottoAI** פותח על ידי צוות מתכנתים בכיר ומומחי סטטיסטיקה מהשורה הראשונה.\n\n"
+    "המערכת סורקת עשרות אלפי הגרלות עבר, מנתחת דפוסים הסתברותיים ומשתמשת "
+    "בנוסחאות מתמטיות ייחודיות כדי לזקק עבורך את הצירופים בעלי הפוטנציאל הגבוה ביותר.\n\n"
     "✅ ניתוח רצפים עמוק\n"
     "✅ סינון צירופים בעלי הסתברות נמוכה\n"
     "✅ עדכונים בזמן אמת לפני כל הגרלה"
@@ -59,6 +60,7 @@ async def send_welcome(message: types.Message):
     
     welcome_img = "https://images.unsplash.com/photo-1518133835878-5a93cc3f89e5?q=80&w=1000"
     
+    # שלב 1: בדיקת אישור תנאים
     if not user.get('agreed_to_terms', False):
         keyboard = types.InlineKeyboardMarkup().add(
             types.InlineKeyboardButton('✅ אני מאשר את התנאים והאחריות', callback_data='agree_terms')
@@ -71,7 +73,7 @@ async def show_main_menu(chat_id, name):
     text = (
         f"שלום {name}! 🎰\n\n"
         f"{MARKETING_STORY}\n\n"
-        "האלגוריתם סיים את הניתוח המעודכן. מה תרצה לעשות?"
+        "האלגוריתם מוכן לעבודה. מה תרצה לעשות?"
     )
     keyboard = types.InlineKeyboardMarkup(row_width=1).add(
         types.InlineKeyboardButton('🎰 הפק 10 שורות VIP', callback_data='get_lotto'),
@@ -82,7 +84,7 @@ async def show_main_menu(chat_id, name):
 @dp.callback_query_handler(lambda c: c.data == 'agree_terms')
 async def process_agree(callback_query: types.CallbackQuery):
     user_id = str(callback_query.from_user.id)
-    await user_agreed_to_terms(user_id)
+    await user_agreed_to_terms(user_id) # תיעוד הסכמה ב-DB
     await bot.answer_callback_query(callback_query.id, "התנאים אושרו בהצלחה!")
     await bot.delete_message(callback_query.message.chat.id, callback_query.message.message_id)
     await show_main_menu(callback_query.message.chat.id, callback_query.from_user.first_name)
@@ -134,5 +136,5 @@ if __name__ == '__main__':
     server_app, port = start_server()
     loop = asyncio.get_event_loop()
     loop.create_task(executor.start_polling(dp, skip_updates=True))
-    # host='0.0.0.0' קריטי ל-Render
+    # host='0.0.0.0' פותר את בעיית ה-Port ב-Render
     web.run_app(server_app, host='0.0.0.0', port=port)
