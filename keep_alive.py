@@ -1,16 +1,16 @@
 from aiohttp import web
 import os
 import logging
-from database_manager import set_user_premium
 
 logging.basicConfig(level=logging.INFO)
 
 async def handle_home(request):
-    """דף הבית - בשביל הבדיקה של Render"""
-    return web.Response(text="LottoAI Engine is Online and Binding Successful!")
+    """דף בית פשוט כדי ש-Render יוכל לבצע Health Check"""
+    return web.Response(text="LottoAI Core Engine is Online!")
 
 async def handle_paypal_webhook(request):
-    """ניהול הודעות התשלום מפייפאל"""
+    """מאזין להודעות תשלום מפייפאל"""
+    from database_manager import set_user_premium
     from bot import bot
     try:
         data = await request.json()
@@ -21,20 +21,21 @@ async def handle_paypal_webhook(request):
         if not user_id and 'subscriber' in resource:
             user_id = resource['subscriber'].get('custom_id')
 
+        # אירועי הצלחת תשלום
         if user_id and event_type in ['PAYMENT.SALE.COMPLETED', 'BILLING.SUBSCRIPTION.ACTIVATED']:
             expiry = await set_user_premium(user_id, resource.get('id'))
             
-            success_msg = (
+            msg = (
                 "🎊 **ברוכים הבאים לנבחרת ה-VIP!** 🎊\n\n"
-                "התשלום עבר בהצלחה. הגישה לאלגוריתם נפתחה עבורך ללא הגבלה.\n"
+                "התשלום התקבל בהצלחה. הגישה לאלגוריתם נפתחה עבורך ללא הגבלה.\n"
                 f"תוקף המנוי: {expiry}\n\n"
-                "צא לדרך ובהצלחה בהגרלה! 🍀"
+                "צא לדרך ובהצלחה בהגרלה הקרובה! 🍀"
             )
-            await bot.send_message(user_id, success_msg, parse_mode="Markdown")
+            await bot.send_message(user_id, msg, parse_mode="Markdown")
 
         return web.Response(text="OK", status=200)
     except Exception as e:
-        logging.error(f"Webhook Error: {e}")
+        logging.error(f"Webhook error: {e}")
         return web.Response(text="Error", status=400)
 
 def start_server():
@@ -42,6 +43,6 @@ def start_server():
     app.router.add_get('/', handle_home)
     app.router.add_post('/webhook/paypal', handle_paypal_webhook)
     
-    # Render מספק את הפורט במשתנה סביבה בשם PORT
+    # Render מספק את הפורט במשתנה סביבה PORT
     port = int(os.environ.get("PORT", 8080))
     return app, port
