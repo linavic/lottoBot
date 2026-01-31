@@ -17,7 +17,6 @@ async def handle_paypal_webhook(request):
         event_type = data.get('event_type')
         resource = data.get('resource', {})
         
-        # פייפאל שומרת את ה-ID של המשתמש בשדה custom_id ששלחנו בלינק
         user_id = resource.get('custom_id') or resource.get('custom')
         if not user_id and 'subscriber' in resource:
             user_id = resource['subscriber'].get('custom_id')
@@ -27,7 +26,6 @@ async def handle_paypal_webhook(request):
         if user_id and event_type in ['PAYMENT.SALE.COMPLETED', 'BILLING.SUBSCRIPTION.ACTIVATED']:
             expiry = await set_user_premium(user_id, resource.get('id'))
             
-            # שליחת הודעה אוטומטית למשתמש בטלגרם
             msg = (
                 "🎊 **התשלום אושר! המנוי שלך הופעל** 🎊\n\n"
                 "הגישה לאלגוריתם נפתחה עבורך ללא הגבלה.\n"
