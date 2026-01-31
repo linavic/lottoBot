@@ -20,20 +20,18 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-# --- תוכן שיווקי ומיתוג ---
+# --- תוכן שיווקי משודרג ---
 MARKETING_STORY = (
-    "🔬 **הטכנולוגיה שמאחורי המזל שלך**\n\n"
-    "מערכת **LottoAI** אינה מבוססת על ניחושים אקראיים. "
-    "האלגוריתם הייחודי שלנו פותח על ידי צוות של **טובי המתכנתים ומומחי סטטיסטיקה** מהשורה הראשונה.\n\n"
-    "באמצעות נוסחאות מתמטיות מורכבות, המערכת סורקת עשרות אלפי הגרלות עבר של מפעל הפיס, "
-    "מזהה דפוסים חוזרים (Patterns) ומחשבת את ההסתברות המדויקת של כל מספר.\n\n"
-    "✅ ניתוח רצפים סטטיסטיים מתקדם\n"
-    "✅ סינון צירופים בעלי סבירות נמוכה\n"
-    "✅ עדכון נתונים בזמן אמת לפני כל הגרלה"
+    "🚀 **מהפכת הניבוי של LottoAI**\n\n"
+    "אל תסתמכו על מזל עיוור. המערכת שלנו מבוססת על **אלגוריתם ייחודי** שפותח על ידי טובי המתכנתים ומומחי סטטיסטיקה מהשורה הראשונה.\n\n"
+    "המערכת סורקת עשרות אלפי הגרלות עבר של מפעל הפיס, מנתחת דפוסים חוזרים ומשתמשת ב**נוסחאות מתמטיות בלעדיות** כדי לזקק עבורכם את הצירופים בעלי ההסתברות הגבוהה ביותר לזכייה.\n\n"
+    "✅ ניתוח סטטיסטי עמוק של רצפים\n"
+    "✅ סינון צירופים חלשים בזמן אמת\n"
+    "✅ המלצות מבוססות מדע ולא ניחוש"
 )
 
 def generate_algorithmic_lines():
-    """מייצר 10 שורות לוטו (האלגוריתם המדומה שלנו)"""
+    """מייצר 10 שורות לוטו (סימולציה של האלגוריתם)"""
     lines = []
     for _ in range(10):
         nums = sorted(random.sample(range(1, 38), 6))
@@ -41,13 +39,14 @@ def generate_algorithmic_lines():
         lines.append(nums + [strong])
     return lines
 
-def format_lotto_ui(results):
-    text = "🎰 **התחזית האלגוריתמית עבורך:**\n\n"
+def format_lotto_ui(results, is_vip=False):
+    title = "⭐ **תחזית VIP אלגוריתמית:**" if is_vip else "🎫 **התחזית החינמית שלך:**"
+    text = f"{title}\n\n"
     for i, row in enumerate(results, 1):
         nums = "  ".join([f"<b>{n}</b>" for n in row[:-1]])
         strong = f"⭐ <b>{row[-1]}</b>"
         text += f"{i}. {nums} | {strong}\n"
-    text += "\n🍀 *המדע לצידך, המזל בידיך.*"
+    text += "\n🍀 *האלגוריתם סיים את החישוב. המזל בידיים שלך.*"
     return text
 
 @dp.message_handler(commands=['start'])
@@ -55,21 +54,21 @@ async def send_welcome(message: types.Message):
     user_id = str(message.from_user.id)
     await get_user_data(user_id)
     
-    # תמונת ברוכים הבאים (משיכה מה-URL ששמת ב-GitHub או תמונה כללית)
+    # תמונת קאבר מקצועית
     welcome_img = "https://images.unsplash.com/photo-1518133835878-5a93cc3f89e5?q=80&w=1000"
     
     welcome_text = (
         f"שלום {message.from_user.first_name}! 👋\n\n"
         "ברוך הבא ל-**LottoAI**.\n"
-        "הגעת למקום שבו בינה מלאכותית פוגשת את הגרלת הלוטו.\n\n"
+        "הגעת למערכת הניבוי המתקדמת בישראל.\n\n"
         f"{MARKETING_STORY}\n\n"
-        "🎁 לרגל הצטרפותך, המערכת הפיקה עבורך **תחזית VIP אחת (10 שורות) בחינם לחלוטין!**"
+        "🎁 לרגל הצטרפותך, המערכת הפיקה עבורך **תחזית VIP אחת (10 שורות) בחינם!**"
     )
     
     keyboard = types.InlineKeyboardMarkup(row_width=1)
     keyboard.add(
         types.InlineKeyboardButton('🎰 הפק 10 שורות חינם', callback_data='get_free'),
-        types.InlineKeyboardButton('🔍 איך זה עובד?', callback_data='how_it_works')
+        types.InlineKeyboardButton('🔍 איך האלגוריתם עובד?', callback_data='how_it_works')
     )
     
     await bot.send_photo(message.chat.id, welcome_img, caption=welcome_text, parse_mode="Markdown", reply_markup=keyboard)
@@ -86,16 +85,16 @@ async def process_free_lotto(callback_query: types.CallbackQuery):
     
     if not user.get('has_used_free', False):
         results = generate_algorithmic_lines()
-        await update_user_data(user_id, {"has_used_free": True})
+        await update_user_data(user_id, {"has_used_free": True, "total_requests": user.get('total_requests', 0) + 1})
         
         await bot.send_message(user_id, format_lotto_ui(results), parse_mode="HTML")
         
-        # הודעת דחיפה למנוי (Marketing Push)
+        # הודעת דחיפה (Push) אחרי קבלת החינם
         await asyncio.sleep(2)
         promo = (
-            "🧐 **הידעת?**\n"
-            "מנויי ה-VIP שלנו מקבלים תחזיות מעודכנות לכל הגרלה ללא הגבלה, כולל התראות על 'מספרים חמים' עם הסתברות זכייה גבוהה.\n\n"
-            "אל תשאיר את המזל שלך ליד המקרה. הצטרף לנבחרת המנצחת ב-10 ש\"ח בלבד!"
+            "🧐 **רוצה להמשיך להשתמש במדע לטובתך?**\n\n"
+            "מנויי ה-VIP שלנו מקבלים גישה בלתי מוגבלת לתחזיות המעודכנות ביותר לפני כל הגרלה.\n\n"
+            "במחיר של כוס קפה - 10 ש\"ח בלבד לחודש, והאלגוריתם עובד עבורך!"
         )
         keyboard = types.InlineKeyboardMarkup().add(
             types.InlineKeyboardButton('💳 הצטרף ל-VIP עכשיו', callback_data='show_pay')
@@ -109,10 +108,9 @@ async def show_payment_options(user_id):
     url = f"{BASE_PAYMENT_URL}{connector}custom={user_id}"
     
     text = (
-        "🛑 **מגבלת שימוש חינמי**\n\n"
-        "ניצלת את התחזית החינמית שלך.\n"
-        "האלגוריתם שלנו ממשיך לנתח נתונים 24/7 כדי להעניק לך את היתרון היחסי.\n\n"
-        "הצטרף עכשיו למנוי ה-VIP ותהנה מגישה מלאה לכל התחזיות והנתונים הסטטיסטיים!"
+        "🛑 **ניצלת את התחזית החינמית שלך**\n\n"
+        "האלגוריתם שלנו ממשיך לנתח נתונים ברגעים אלו ממש כדי להעניק לך את היתרון היחסי.\n\n"
+        "אל תשאיר את המזל שלך ליד המקרה - הצטרף למאות המשתמשים שמשתמשים במדע כדי לנצח!"
     )
     keyboard = types.InlineKeyboardMarkup().add(
         types.InlineKeyboardButton('💳 מנוי VIP חודשי - 10 ש"ח', url=url)
@@ -125,14 +123,10 @@ async def callback_pay(callback_query: types.CallbackQuery):
 
 if __name__ == '__main__':
     from aiohttp import web
-    # פתרון בעיית ה-PORT ב-Render:
-    # אנחנו מפעילים שרת אינטרנט שמקשיב לפורט ש-Render נותן לנו
+    # פתרון בעיית ה-PORT ב-Render
     server_app, port = start_server()
-    
     loop = asyncio.get_event_loop()
-    # הרצת הבוט ברקע
     loop.create_task(executor.start_polling(dp, skip_updates=True))
     
-    # הרצת שרת האינטרנט (זה מה ש-Render מחפש!)
-    # חובה להשתמש ב-host='0.0.0.0'
+    # חובה להשתמש ב-host='0.0.0.0' כדי ש-Render יזהה את השרת
     web.run_app(server_app, host='0.0.0.0', port=port)
