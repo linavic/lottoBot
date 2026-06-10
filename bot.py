@@ -23,7 +23,6 @@ load_dotenv()
 
 API_TOKEN = os.getenv("TELEGRAM_API_TOKEN")
 PLAN_ID = os.getenv("PAYPAL_PLAN_ID", "P-39U78069VC411525WNF64WEA")
-PAYPAL_URL = f"https://www.paypal.com/webapps/billing/plans/subscribe?plan_id={PLAN_ID}"
 PAYPAL_MODE = os.getenv("PAYPAL_MODE", "live").lower()
 PAYPAL_API_URL = "https://api-m.sandbox.paypal.com" if PAYPAL_MODE == "sandbox" else "https://api-m.paypal.com"
 PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID")
@@ -106,8 +105,8 @@ async def get_paypal_access_token():
 async def create_paypal_subscription(user_id):
     token = await get_paypal_access_token()
     if not token:
-        logging.warning("Missing PayPal credentials; using fallback plan URL.")
-        return f"{PAYPAL_URL}&custom={user_id}"
+        logging.error("Cannot create PayPal subscription because PayPal API credentials are missing or invalid.")
+        return None
 
     payload = {
         "plan_id": PLAN_ID,
@@ -140,14 +139,14 @@ async def create_paypal_subscription(user_id):
             data = await response.json(content_type=None)
             if response.status not in (200, 201):
                 logging.error("PayPal subscription create failed: %s %s", response.status, data)
-                return f"{PAYPAL_URL}&custom={user_id}"
+                return None
 
     for link in data.get("links", []):
         if link.get("rel") == "approve":
             return link.get("href")
 
     logging.error("PayPal subscription response did not include approve link: %s", data)
-    return f"{PAYPAL_URL}&custom={user_id}"
+    return None
 
 
 async def send_share_prompt(user_id):
@@ -384,6 +383,13 @@ async def process_lotto(callback_query: types.CallbackQuery):
 
 async def show_payment_options(user_id):
     url = await create_paypal_subscription(user_id)
+    if not url:
+        await bot.send_message(
+            user_id,
+            "לא ניתן לפתוח כרגע קישור תשלום. אנא נסה שוב בעוד כמה דקות או פנה לתמיכה.",
+        )
+        return
+
     text = (
         "🛑 **מגבלת שימוש חינמי**\n\n"
         "כבר ניצלת את התחזית החינמית. הצטרף ל-VIP כדי להמשיך ללא הגבלה."
