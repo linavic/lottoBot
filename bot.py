@@ -204,6 +204,78 @@ async def show_whoami(message: types.Message):
     )
 
 
+@dp.message_handler(commands=["grantvip"])
+async def grant_vip(message: types.Message):
+    if not is_admin(message.from_user.id):
+        await bot.send_message(message.chat.id, "אין לך הרשאה לבצע פעולה זו.")
+        return
+
+    target_user_id = message.get_args().strip()
+    if not target_user_id.isdigit():
+        await bot.send_message(message.chat.id, "שימוש נכון: /grantvip 123456789")
+        return
+
+    expiry = await set_user_premium(target_user_id, "manual_admin_grant")
+    await bot.send_message(
+        message.chat.id,
+        f"VIP נפתח למשתמש <code>{target_user_id}</code>\nתוקף עד: <b>{expiry}</b>",
+        parse_mode="HTML",
+    )
+
+    try:
+        await bot.send_message(
+            target_user_id,
+            f"🎊 מנוי VIP הופעל עבורך!\nתוקף: {expiry}\nאפשר להפיק הגרלות ללא הגבלה.",
+        )
+    except Exception as e:
+        logging.warning("Could not notify manually granted VIP user %s: %s", target_user_id, e)
+
+
+@dp.message_handler(commands=["revokevip"])
+async def revoke_vip(message: types.Message):
+    if not is_admin(message.from_user.id):
+        await bot.send_message(message.chat.id, "אין לך הרשאה לבצע פעולה זו.")
+        return
+
+    target_user_id = message.get_args().strip()
+    if not target_user_id.isdigit():
+        await bot.send_message(message.chat.id, "שימוש נכון: /revokevip 123456789")
+        return
+
+    await update_user_data(target_user_id, {"is_premium": False})
+    await bot.send_message(
+        message.chat.id,
+        f"VIP בוטל למשתמש <code>{target_user_id}</code>",
+        parse_mode="HTML",
+    )
+
+
+@dp.message_handler(commands=["userstatus"])
+async def user_status(message: types.Message):
+    if not is_admin(message.from_user.id):
+        await bot.send_message(message.chat.id, "אין לך הרשאה לבצע פעולה זו.")
+        return
+
+    target_user_id = message.get_args().strip()
+    if not target_user_id.isdigit():
+        await bot.send_message(message.chat.id, "שימוש נכון: /userstatus 123456789")
+        return
+
+    user = await get_user_data(target_user_id)
+    premium_status = "כן" if user.get("is_premium", False) else "לא"
+    await bot.send_message(
+        message.chat.id,
+        (
+            f"משתמש: <code>{target_user_id}</code>\n"
+            f"VIP פעיל: <b>{premium_status}</b>\n"
+            f"תוקף: <b>{user.get('expiry_date') or 'אין'}</b>\n"
+            f"ניצל חינם: <b>{'כן' if user.get('has_used_free') else 'לא'}</b>\n"
+            f"קרדיטים חינמיים: <b>{user.get('free_credits', 0)}</b>"
+        ),
+        parse_mode="HTML",
+    )
+
+
 async def show_main_menu(chat_id, name):
     text = f"שלום {name}! 🎰\n\n{MARKETING_STORY}\n\nהאלגוריתם מוכן. מה תרצה לעשות?"
     keyboard = types.InlineKeyboardMarkup(row_width=1).add(
