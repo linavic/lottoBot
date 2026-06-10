@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 from database_manager import (
     award_referral_credit,
+    get_all_users,
     get_user_data,
     set_referrer,
     set_user_premium,
@@ -176,6 +177,14 @@ async def send_welcome(message: types.Message):
         await set_referrer(user_id, args.replace("ref_", "", 1))
 
     user = await get_user_data(user_id)
+    await update_user_data(
+        user_id,
+        {
+            "first_name": message.from_user.first_name,
+            "last_name": message.from_user.last_name,
+            "username": message.from_user.username,
+        },
+    )
     welcome_img = "https://images.unsplash.com/photo-1518133835878-5a93cc3f89e5?q=80&w=1000"
 
     if not user.get("agreed_to_terms", False):
@@ -274,6 +283,47 @@ async def user_status(message: types.Message):
         ),
         parse_mode="HTML",
     )
+
+
+@dp.message_handler(commands=["users"])
+async def list_users(message: types.Message):
+    if not is_admin(message.from_user.id):
+        await bot.send_message(message.chat.id, "אין לך הרשאה לבצע פעולה זו.")
+        return
+
+    users = await get_all_users()
+    if not users:
+        await bot.send_message(message.chat.id, "עדיין אין משתמשים שמורים.")
+        return
+
+    lines = []
+    for user_id, user in sorted(users.items()):
+        username = user.get("username")
+        first_name = user.get("first_name") or ""
+        last_name = user.get("last_name") or ""
+        display_name = " ".join(part for part in [first_name, last_name] if part).strip()
+        label_parts = []
+        if display_name:
+            label_parts.append(display_name)
+        if username:
+            label_parts.append(f"@{username}")
+        label = " | ".join(label_parts) if label_parts else "ללא שם שמור"
+        vip = "VIP" if user.get("is_premium") else "רגיל"
+        lines.append(f"{user_id} - {label} - {vip}")
+
+    chunks = []
+    current = "משתמשים שמורים:\n\n"
+    for line in lines:
+        next_line = f"{line}\n"
+        if len(current) + len(next_line) > 3500:
+            chunks.append(current)
+            current = ""
+        current += next_line
+    if current:
+        chunks.append(current)
+
+    for chunk in chunks:
+        await bot.send_message(message.chat.id, chunk)
 
 
 async def show_main_menu(chat_id, name):

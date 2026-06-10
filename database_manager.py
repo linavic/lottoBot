@@ -12,7 +12,10 @@ DEFAULT_USER = {
     "subscription_id": None,
     "free_credits": 0,
     "referred_by": None,
-    "referral_awarded": False
+    "referral_awarded": False,
+    "first_name": None,
+    "last_name": None,
+    "username": None
 }
 
 async def get_user_data(user_id):
@@ -54,6 +57,16 @@ async def update_user_data(user_id, updates):
         data[user_id] = {}
     data[user_id].update(updates)
     save_db(data)
+
+async def get_all_users():
+    if not os.path.exists(DB_FILE):
+        return {}
+    try:
+        with open(DB_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except:
+        return {}
+    return data
 
 async def set_user_premium(user_id, sub_id=None):
     expiry = (datetime.now() + timedelta(days=31)).strftime("%Y-%m-%d %H:%M:%S")
