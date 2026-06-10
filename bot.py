@@ -272,12 +272,7 @@ async def handle_home(request):
 
 
 async def handle_paypal_success(request):
-    user_id = request.query.get("user_id")
-    subscription_id = request.query.get("subscription_id") or request.query.get("ba_token")
-    if user_id:
-        expiry = await set_user_premium(user_id, subscription_id)
-        await bot.send_message(user_id, f"🎊 **מנוי VIP הופעל!**\nתוקף: {expiry}\nבהצלחה!", parse_mode="Markdown")
-    return web.Response(text="Payment approved. You can return to Telegram.")
+    return web.Response(text="Payment approved. VIP access will be activated by the PayPal webhook.")
 
 
 async def handle_paypal_cancel(request):
