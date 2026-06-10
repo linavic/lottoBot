@@ -88,6 +88,7 @@ async def get_paypal_access_token():
         "Accept-Language": "en_US",
         "Content-Type": "application/x-www-form-urlencoded",
     }
+
     async with ClientSession() as session:
         async with session.post(
             f"{PAYPAL_API_URL}/v1/oauth2/token",
@@ -128,6 +129,7 @@ async def create_paypal_subscription(user_id):
         "Accept": "application/json",
         "Prefer": "return=representation",
     }
+
     async with ClientSession() as session:
         async with session.post(
             f"{PAYPAL_API_URL}/v1/billing/subscriptions",
