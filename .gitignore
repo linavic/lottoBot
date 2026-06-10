@@ -1,1 +1,6 @@
-.env__pycache__/*.pycpaid_users.jsonLotto.sln*.user
+__pycache__/
+*.py[cod]
+users_db.json
+paid_users.json
+local_test.db
+.env

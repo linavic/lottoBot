@@ -2,6 +2,7 @@
 import aiogram
 import pandas
 import numpy
-import stripe
+import aiohttp
+import requests
 
 print("All packages imported successfully!")

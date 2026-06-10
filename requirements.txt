@@ -3,3 +3,4 @@ python-dotenv
 aiohttp
 pandas
 openpyxl
+requests
