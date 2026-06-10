@@ -328,7 +328,7 @@ async def list_users(message: types.Message):
 async def show_main_menu(chat_id, name):
     text = f"שלום {name}! 🎰\n\n{MARKETING_STORY}\n\nהאלגוריתם מוכן. מה תרצה לעשות?"
     keyboard = types.InlineKeyboardMarkup(row_width=1).add(
-        types.InlineKeyboardButton("🎰 הפק 10 שורות VIP", callback_data="get_lotto"),
+        types.InlineKeyboardButton("🎰 הפק 10 שורות חינם", callback_data="get_lotto"),
         types.InlineKeyboardButton("💳 הצטרף למנוי VIP", callback_data="show_pay"),
         types.InlineKeyboardButton("🎁 הזמן חבר וקבל הגרלה חינמית", callback_data="share_friend"),
     )
