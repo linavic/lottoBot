@@ -29,6 +29,8 @@ PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID")
 PAYPAL_CLIENT_SECRET = os.getenv("PAYPAL_CLIENT_SECRET")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "")
+TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", API_TOKEN[-16:] if API_TOKEN else "telegram")
+USE_TELEGRAM_WEBHOOK = os.getenv("USE_TELEGRAM_WEBHOOK", "auto").lower()
 ADMIN_IDS = {
     admin_id.strip()
     for admin_id in os.getenv("ADMIN_IDS", "").split(",")
@@ -40,6 +42,7 @@ logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
+polling_task = None
 
 DISCLAIMER_TEXT = (
     "⚠️ **כתב ויתור אחריות ותנאי שימוש** ⚠️\n\n"
@@ -279,6 +282,12 @@ async def handle_paypal_cancel(request):
     return web.Response(text="Payment cancelled. You can return to Telegram.")
 
 
+async def handle_telegram_webhook(request):
+    update = types.Update(**await request.json())
+    await dp.process_update(update)
+    return web.Response(text="OK")
+
+
 async def handle_paypal_webhook(request):
     try:
         data = await request.json()
@@ -316,9 +325,31 @@ async def handle_paypal_webhook(request):
 
 
 async def on_startup(app):
+    global polling_task
+    should_use_webhook = USE_TELEGRAM_WEBHOOK == "true" or (
+        USE_TELEGRAM_WEBHOOK == "auto" and bool(PUBLIC_BASE_URL)
+    )
+
+    if should_use_webhook:
+        telegram_webhook_url = f"{PUBLIC_BASE_URL}/webhook/telegram/{TELEGRAM_WEBHOOK_SECRET}"
+        logging.info("Starting Telegram webhook: %s", telegram_webhook_url)
+        await bot.set_webhook(telegram_webhook_url, drop_pending_updates=True)
+        return
+
     logging.info("Starting Telegram Bot Polling...")
     await bot.delete_webhook(drop_pending_updates=True)
-    asyncio.create_task(dp.start_polling())
+    polling_task = asyncio.create_task(dp.start_polling())
+
+
+async def on_shutdown(app):
+    global polling_task
+    if polling_task:
+        polling_task.cancel()
+        try:
+            await polling_task
+        except asyncio.CancelledError:
+            pass
+    await bot.session.close()
 
 
 if __name__ == "__main__":
@@ -327,5 +358,7 @@ if __name__ == "__main__":
     app.router.add_get("/paypal/success", handle_paypal_success)
     app.router.add_get("/paypal/cancel", handle_paypal_cancel)
     app.router.add_post("/webhook/paypal", handle_paypal_webhook)
+    app.router.add_post(f"/webhook/telegram/{TELEGRAM_WEBHOOK_SECRET}", handle_telegram_webhook)
     app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
     web.run_app(app, host="0.0.0.0", port=PORT)
