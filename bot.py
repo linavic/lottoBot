@@ -191,6 +191,17 @@ async def send_welcome(message: types.Message):
         await show_main_menu(message.chat.id, message.from_user.first_name)
 
 
+@dp.message_handler(commands=["whoami"])
+async def show_whoami(message: types.Message):
+    user_id = str(message.from_user.id)
+    admin_status = "כן" if is_admin(user_id) else "לא"
+    await bot.send_message(
+        message.chat.id,
+        f"Telegram ID שלך: <code>{user_id}</code>\nמזוהה כאדמין: <b>{admin_status}</b>",
+        parse_mode="HTML",
+    )
+
+
 async def show_main_menu(chat_id, name):
     text = f"שלום {name}! 🎰\n\n{MARKETING_STORY}\n\nהאלגוריתם מוכן. מה תרצה לעשות?"
     keyboard = types.InlineKeyboardMarkup(row_width=1).add(
@@ -333,10 +344,12 @@ async def on_startup(app):
     if should_use_webhook:
         telegram_webhook_url = f"{PUBLIC_BASE_URL}/webhook/telegram/{TELEGRAM_WEBHOOK_SECRET}"
         logging.info("Starting Telegram webhook: %s", telegram_webhook_url)
+        logging.info("Configured admin IDs: %s", ", ".join(sorted(ADMIN_IDS)) or "none")
         await bot.set_webhook(telegram_webhook_url, drop_pending_updates=True)
         return
 
     logging.info("Starting Telegram Bot Polling...")
+    logging.info("Configured admin IDs: %s", ", ".join(sorted(ADMIN_IDS)) or "none")
     await bot.delete_webhook(drop_pending_updates=True)
     polling_task = asyncio.create_task(dp.start_polling())
 
