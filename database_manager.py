@@ -24,6 +24,7 @@ DEFAULT_USER = {
     "first_name": None,
     "last_name": None,
     "username": None,
+    "source": None,
 }
 
 DATABASE_URL = os.getenv("DATABASE_URL") or "sqlite:///./local_test.db"
@@ -81,6 +82,7 @@ async def get_user_data(user_id):
         record, data = _load(session, user_id)
         if record is None:
             data = DEFAULT_USER.copy()
+            data["joined_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             session.add(UserRecord(user_id=user_id, data=json.dumps(data, ensure_ascii=False)))
             session.commit()
             return data
@@ -117,6 +119,8 @@ async def get_all_users():
     with SessionLocal() as session:
         users = {}
         for record in session.execute(select(UserRecord)).scalars():
+            if record.user_id.startswith("_"):
+                continue
             try:
                 users[record.user_id] = json.loads(record.data)
             except json.JSONDecodeError:
@@ -177,3 +181,24 @@ async def use_free_credit(user_id):
 
     await update_user_data(user_id, {"free_credits": credits - 1})
     return True
+
+
+SETTINGS_KEY = "_settings"
+
+
+async def get_setting(name, default=None):
+    with SessionLocal() as session:
+        record, data = _load(session, SETTINGS_KEY)
+        return (data or {}).get(name, default)
+
+
+async def set_setting(name, value):
+    with SessionLocal() as session:
+        record, data = _load(session, SETTINGS_KEY)
+        if record is None:
+            data = {}
+            record = UserRecord(user_id=SETTINGS_KEY)
+            session.add(record)
+        data[name] = value
+        record.data = json.dumps(data, ensure_ascii=False)
+        session.commit()

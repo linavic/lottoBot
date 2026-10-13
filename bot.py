@@ -4,7 +4,8 @@ import html
 import logging
 import os
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, types
 from aiohttp import ClientSession, web
@@ -13,8 +14,10 @@ from dotenv import load_dotenv
 from database_manager import (
     award_referral_credit,
     get_all_users,
+    get_setting,
     get_user_data,
     set_referrer,
+    set_setting,
     set_user_premium,
     update_user_data,
     use_free_credit,
@@ -42,12 +45,27 @@ PORT = int(os.environ.get("PORT", 8080))
 VIP_STARS_PRICE = int(os.getenv("VIP_STARS_PRICE", "150"))
 VIP_DAYS = 31
 STARS_PAYLOAD = "vip_stars_31d"
+# ערוץ שהבוט מנהל בו ומפרסם אליו שורות חינם לפני הגרלות, למשל @LottoAI_IL
+CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()
+# זמני פרסום בשעון ישראל: יום (mon..sun) ושעה, מופרדים בפסיק
+CHANNEL_POST_TIMES = os.getenv("CHANNEL_POST_TIMES", "tue 10:00,fri 12:00")
+ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
+WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+BOT_DESCRIPTION = (
+    "🎰 10 שורות לוטו בלחיצה אחת!\n"
+    "כל שורה עם מספר חזק, כל השורות שונות זו מזו.\n"
+    "ההרצה הראשונה חינם. VIP ללא הגבלה בכוכבי טלגרם או ב-PayPal.\n\n"
+    "הבוט אינו קשור למפעל הפיס. שחקו באחריות."
+)
+BOT_SHORT_DESCRIPTION = "מחולל שורות לוטו: 10 שורות בלחיצה. ראשונה חינם. שחקו באחריות 🍀"
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 polling_task = None
+scheduler_task = None
 
 DISCLAIMER_TEXT = (
     "⚠️ <b>לפני שמתחילים</b>\n\n"
@@ -188,10 +206,17 @@ async def send_share_prompt(user_id):
 async def send_welcome(message: types.Message):
     user_id = str(message.from_user.id)
     args = message.get_args()
+    user = await get_user_data(user_id)
     if args.startswith("ref_"):
         await set_referrer(user_id, args.replace("ref_", "", 1))
-
-    user = await get_user_data(user_id)
+    if not user.get("source") and not user.get("agreed_to_terms"):
+        if args.startswith("ref_"):
+            source = "referral"
+        elif args.startswith("src_"):
+            source = args[4:40] or "direct"
+        else:
+            source = "direct"
+        await update_user_data(user_id, {"source": source})
     await update_user_data(
         user_id,
         {
@@ -343,6 +368,61 @@ async def user_status(message: types.Message):
         ),
         parse_mode="HTML",
     )
+
+
+@dp.message_handler(commands=["stats"])
+async def show_stats(message: types.Message):
+    if not is_admin(message.from_user.id):
+        await bot.send_message(message.chat.id, "אין לך הרשאה לבצע פעולה זו.")
+        return
+
+    users = await get_all_users()
+    week_ago = datetime.now() - timedelta(days=7)
+    total = len(users)
+    agreed = sum(1 for u in users.values() if u.get("agreed_to_terms"))
+    used_free = sum(1 for u in users.values() if u.get("has_used_free"))
+    vip = sum(1 for u in users.values() if is_premium_active(u))
+    stars_buyers = sum(1 for u in users.values() if str(u.get("subscription_id") or "").startswith("stars:"))
+    new_week = 0
+    sources = {}
+    for u in users.values():
+        sources[u.get("source") or "לא ידוע"] = sources.get(u.get("source") or "לא ידוע", 0) + 1
+        try:
+            if datetime.strptime(u.get("joined_at") or "", "%Y-%m-%d %H:%M:%S") > week_ago:
+                new_week += 1
+        except ValueError:
+            pass
+
+    source_lines = "\n".join(
+        f"  {html.escape(name)}: {count}" for name, count in sorted(sources.items(), key=lambda x: -x[1])
+    )
+    await bot.send_message(
+        message.chat.id,
+        (
+            "📊 <b>סטטיסטיקה</b>\n\n"
+            f"משתמשים: <b>{total}</b> (חדשים השבוע: {new_week})\n"
+            f"אישרו תנאים: <b>{agreed}</b>\n"
+            f"הפיקו הגרלה חינמית: <b>{used_free}</b>\n"
+            f"VIP פעילים: <b>{vip}</b> (מתוכם שילמו בכוכבים: {stars_buyers})\n\n"
+            f"<b>מקורות הגעה:</b>\n{source_lines}"
+        ),
+        parse_mode="HTML",
+    )
+
+
+@dp.message_handler(commands=["postnow"])
+async def post_now(message: types.Message):
+    if not is_admin(message.from_user.id):
+        await bot.send_message(message.chat.id, "אין לך הרשאה לבצע פעולה זו.")
+        return
+    if not CHANNEL_ID:
+        await bot.send_message(message.chat.id, "לא הוגדר CHANNEL_ID ב-Render.")
+        return
+    try:
+        await post_to_channel()
+        await bot.send_message(message.chat.id, "✅ פורסם בערוץ.")
+    except Exception as e:
+        await bot.send_message(message.chat.id, f"הפרסום נכשל: {html.escape(str(e))}")
 
 
 @dp.message_handler(commands=["users"])
@@ -517,6 +597,72 @@ async def callback_share(callback_query: types.CallbackQuery):
     await send_share_prompt(callback_query.from_user.id)
 
 
+async def get_bot_username():
+    if BOT_USERNAME:
+        return BOT_USERNAME
+    me = await bot.get_me()
+    return me.username
+
+
+async def post_to_channel():
+    lines = generate_numbers()[:2]
+    text = "🍀 <b>שורות חינם להגרלה הקרובה</b>\n\n"
+    for i, row in enumerate(lines, 1):
+        nums = " · ".join(str(n) for n in row[:-1])
+        text += f"{i}. {nums} | ⭐ {row[-1]}\n"
+    text += "\nרוצים 10 שורות משלכם? לחיצה אחת בבוט 👇\nשחקו באחריות."
+    bot_link = f"https://t.me/{await get_bot_username()}?start=src_channel"
+    keyboard = types.InlineKeyboardMarkup().add(
+        types.InlineKeyboardButton("🎰 קבל 10 שורות חינם", url=bot_link)
+    )
+    await bot.send_message(CHANNEL_ID, text, parse_mode="HTML", reply_markup=keyboard)
+
+
+def parse_post_times():
+    slots = []
+    for part in CHANNEL_POST_TIMES.split(","):
+        try:
+            day, clock = part.strip().lower().split()
+            hour, minute = (int(x) for x in clock.split(":"))
+            slots.append((WEEKDAYS.index(day[:3]), hour, minute))
+        except ValueError:
+            logging.warning("Bad CHANNEL_POST_TIMES entry: %r", part)
+    return slots
+
+
+async def channel_scheduler():
+    slots = parse_post_times()
+    logging.info("Channel posts to %s at %s (Israel time)", CHANNEL_ID, CHANNEL_POST_TIMES)
+    while True:
+        now = datetime.now(ISRAEL_TZ)
+        for weekday, hour, minute in slots:
+            slot_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if now.weekday() != weekday or not slot_time <= now < slot_time + timedelta(minutes=60):
+                continue
+            slot_key = slot_time.strftime("%Y-%m-%d %H:%M")
+            if await get_setting("last_channel_post") == slot_key:
+                continue
+            try:
+                await post_to_channel()
+                await set_setting("last_channel_post", slot_key)
+                logging.info("Posted to channel for slot %s", slot_key)
+            except Exception as e:
+                logging.error("Channel post failed: %s", e)
+        await asyncio.sleep(60)
+
+
+async def setup_bot_profile():
+    try:
+        await bot.set_my_commands([
+            types.BotCommand("start", "התחל / תפריט ראשי"),
+            types.BotCommand("paysupport", "תמיכה בתשלומים"),
+        ])
+        await bot.request("setMyDescription", {"description": BOT_DESCRIPTION})
+        await bot.request("setMyShortDescription", {"short_description": BOT_SHORT_DESCRIPTION})
+    except Exception as e:
+        logging.warning("Could not update bot profile: %s", e)
+
+
 async def handle_home(request):
     return web.Response(text="LottoAI Server is Running!")
 
@@ -572,7 +718,10 @@ async def handle_paypal_webhook(request):
 
 
 async def on_startup(app):
-    global polling_task
+    global polling_task, scheduler_task
+    await setup_bot_profile()
+    if CHANNEL_ID:
+        scheduler_task = asyncio.create_task(channel_scheduler())
     should_use_webhook = USE_TELEGRAM_WEBHOOK == "true" or (
         USE_TELEGRAM_WEBHOOK == "auto" and bool(PUBLIC_BASE_URL)
     )
@@ -592,6 +741,8 @@ async def on_startup(app):
 
 async def on_shutdown(app):
     global polling_task
+    if scheduler_task:
+        scheduler_task.cancel()
     if polling_task:
         polling_task.cancel()
         try:

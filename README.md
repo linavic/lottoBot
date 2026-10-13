@@ -13,6 +13,12 @@ lotto bot
 
 - `VIP_STARS_PRICE` - price of 31 days VIP in Telegram Stars (default `150`). Stars payments need no provider token; admins can refund with `/refundstars <user_id>`.
 - `DATABASE_URL` - Postgres connection string (Neon / Supabase). Without it a local SQLite file is used.
+  For Supabase use the **Session pooler** URI (Render has no IPv6, the direct `db.<ref>.supabase.co` host will not connect).
+- `CHANNEL_ID` - optional Telegram channel (e.g. `@LottoAI_IL`) where the bot is an admin; it posts 2 free lines before draws.
+- `CHANNEL_POST_TIMES` - Israel-time schedule for channel posts, default `tue 10:00,fri 12:00`.
+
+Admin commands: `/stats` (funnel and traffic sources), `/postnow` (post to the channel now), `/users`, `/userstatus`, `/grantvip`, `/revokevip`, `/refundstars`.
+Use `https://t.me/<bot>?start=src_<name>` links per marketing channel (e.g. `src_tiktok`) so `/stats` shows where users came from.
 
 ## Render environment variables
 
