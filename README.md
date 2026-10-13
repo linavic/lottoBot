@@ -1,6 +1,10 @@
 # lottoBot
 lotto bot 
 
+## Python version
+
+`aiogram==2.25.1` requires `aiohttp<3.9`, which does not build on Python 3.12+. The `.python-version` file pins Render to Python 3.11.
+
 ## Render environment variables
 
 Set these variables in Render before deploying:
