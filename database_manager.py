@@ -124,8 +124,18 @@ async def get_all_users():
         return users
 
 
-async def set_user_premium(user_id, sub_id=None):
-    expiry = (datetime.now() + timedelta(days=31)).strftime("%Y-%m-%d %H:%M:%S")
+async def set_user_premium(user_id, sub_id=None, days=31, extend=False):
+    """מפעיל VIP ל-days ימים. עם extend=True, מנוי שעדיין בתוקף מוארך מתאריך התפוגה שלו."""
+    start = datetime.now()
+    if extend:
+        user = await get_user_data(user_id)
+        try:
+            current = datetime.strptime(user.get("expiry_date") or "", "%Y-%m-%d %H:%M:%S")
+            if user.get("is_premium") and current > start:
+                start = current
+        except ValueError:
+            pass
+    expiry = (start + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     await update_user_data(user_id, {"is_premium": True, "expiry_date": expiry, "subscription_id": sub_id})
     return expiry
 

@@ -11,6 +11,7 @@ lotto bot
 2. **מסד נתונים: Neon, Postgres חינמי** (https://neon.tech). פותחים פרויקט, מעתיקים את ה-Connection string ומגדירים אותו ב-Render כמשתנה `DATABASE_URL`. בלי זה המשתמשים ומנויי ה-VIP נמחקים בכל ריסטארט.
 3. **השארת השרת ער: UptimeRobot** (https://uptimerobot.com, חינם). מגדירים בדיקת HTTP כל 5 דקות לכתובת `https://your-service.onrender.com/`. ב-Render יש 750 שעות חינם בחודש, מספיק לשרת אחד שפועל 24/7.
 
+- `VIP_STARS_PRICE` - price of 31 days VIP in Telegram Stars (default `150`). Stars payments need no provider token; admins can refund with `/refundstars <user_id>`.
 - `DATABASE_URL` - Postgres connection string (Neon / Supabase). Without it a local SQLite file is used.
 
 ## Render environment variables

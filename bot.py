@@ -39,6 +39,9 @@ ADMIN_IDS = {
     if admin_id.strip()
 }
 PORT = int(os.environ.get("PORT", 8080))
+VIP_STARS_PRICE = int(os.getenv("VIP_STARS_PRICE", "150"))
+VIP_DAYS = 31
+STARS_PAYLOAD = "vip_stars_31d"
 
 logging.basicConfig(level=logging.INFO)
 
@@ -225,6 +228,51 @@ async def show_whoami(message: types.Message):
     )
 
 
+@dp.message_handler(commands=["paysupport"])
+async def pay_support(message: types.Message):
+    await bot.send_message(
+        message.chat.id,
+        "💬 <b>תמיכה בתשלומים</b>\n\n"
+        "בעיה בתשלום או בהפעלת VIP? כתוב כאן בהודעה אחת מה קרה, "
+        "ואנחנו נחזור אליך תוך 48 שעות. החזר כספי על תשלום בכוכבים אפשרי תוך 14 יום מהרכישה.",
+        parse_mode="HTML",
+    )
+
+
+@dp.message_handler(commands=["refundstars"])
+async def refund_stars(message: types.Message):
+    if not is_admin(message.from_user.id):
+        await bot.send_message(message.chat.id, "אין לך הרשאה לבצע פעולה זו.")
+        return
+
+    target_user_id = message.get_args().strip()
+    if not target_user_id.isdigit():
+        await bot.send_message(message.chat.id, "שימוש נכון: /refundstars 123456789")
+        return
+
+    user = await get_user_data(target_user_id)
+    charge_id = user.get("last_stars_charge_id")
+    if not charge_id:
+        await bot.send_message(message.chat.id, "למשתמש הזה אין תשלום בכוכבים שמור.")
+        return
+
+    try:
+        await bot.request(
+            "refundStarPayment",
+            {"user_id": int(target_user_id), "telegram_payment_charge_id": charge_id},
+        )
+    except Exception as e:
+        await bot.send_message(message.chat.id, f"ההחזר נכשל: {html.escape(str(e))}")
+        return
+
+    await update_user_data(target_user_id, {"is_premium": False, "last_stars_charge_id": None})
+    await bot.send_message(
+        message.chat.id,
+        f"הכוכבים הוחזרו למשתמש <code>{target_user_id}</code> וה-VIP בוטל.",
+        parse_mode="HTML",
+    )
+
+
 @dp.message_handler(commands=["grantvip"])
 async def grant_vip(message: types.Message):
     if not is_admin(message.from_user.id):
@@ -385,7 +433,7 @@ async def process_lotto(callback_query: types.CallbackQuery):
 
         if not unlimited_allowed:
             await asyncio.sleep(2)
-            promo = f"🔓 רוצה שורות ללא הגבלה לכל הגרלה? מנוי VIP ב-{VIP_PRICE_TEXT}, ביטול בכל עת."
+            promo = f"🔓 רוצה שורות ללא הגבלה לכל הגרלה? VIP ב-{VIP_STARS_PRICE} כוכבי טלגרם או ב-{VIP_PRICE_TEXT} ב-PayPal."
             keyboard = types.InlineKeyboardMarkup().add(
                 types.InlineKeyboardButton("💳 למנוי VIP", callback_data="show_pay")
             )
@@ -397,23 +445,64 @@ async def process_lotto(callback_query: types.CallbackQuery):
 
 async def show_payment_options(user_id):
     url = await create_paypal_subscription(user_id)
-    if not url:
-        await bot.send_message(
-            user_id,
-            "לא ניתן לפתוח כרגע קישור תשלום. אנא נסה שוב בעוד כמה דקות או פנה לתמיכה.",
-        )
-        return
 
     text = (
-        "🛑 <b>ההגרלות החינמיות נוצלו</b>\n\n"
-        "אפשר להזמין חבר ולקבל הגרלה נוספת, או להצטרף ל-VIP "
-        f"ולקבל שורות ללא הגבלה ב-{VIP_PRICE_TEXT}. ביטול בכל עת דרך PayPal."
+        "🔓 <b>VIP – שורות ללא הגבלה</b>\n\n"
+        f"⭐ <b>{VIP_STARS_PRICE} כוכבי טלגרם</b> ל-{VIP_DAYS} יום. תשלום בתוך טלגרם, בלי חידוש אוטומטי.\n"
     )
     keyboard = types.InlineKeyboardMarkup(row_width=1).add(
-        types.InlineKeyboardButton(f"💳 מנוי VIP ב-{VIP_PRICE_TEXT}", url=url),
-        types.InlineKeyboardButton("🎁 הזמן חבר וקבל הגרלה", callback_data="share_friend"),
+        types.InlineKeyboardButton(f"⭐ VIP ב-{VIP_STARS_PRICE} כוכבים", callback_data="pay_stars"),
     )
+    if url:
+        text += f"💳 <b>PayPal</b>: מנוי ב-{VIP_PRICE_TEXT}, מתחדש אוטומטית, ביטול בכל עת.\n"
+        keyboard.add(types.InlineKeyboardButton(f"💳 PayPal ב-{VIP_PRICE_TEXT}", url=url))
+    text += "\nאו: הזמן חבר וקבל הגרלה חינמית נוספת."
+    keyboard.add(types.InlineKeyboardButton("🎁 הזמן חבר וקבל הגרלה", callback_data="share_friend"))
     await bot.send_message(user_id, text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@dp.callback_query_handler(lambda c: c.data == "pay_stars")
+async def callback_pay_stars(callback_query: types.CallbackQuery):
+    await bot.answer_callback_query(callback_query.id)
+    await bot.send_invoice(
+        callback_query.from_user.id,
+        title=f"LottoAI VIP – {VIP_DAYS} יום",
+        description="הגרלת שורות לוטו ללא הגבלה. בלי חידוש אוטומטי.",
+        payload=STARS_PAYLOAD,
+        provider_token="",
+        currency="XTR",
+        prices=[types.LabeledPrice(label=f"VIP {VIP_DAYS} יום", amount=VIP_STARS_PRICE)],
+    )
+
+
+@dp.pre_checkout_query_handler(lambda q: True)
+async def process_pre_checkout(pre_checkout_query: types.PreCheckoutQuery):
+    if pre_checkout_query.invoice_payload != STARS_PAYLOAD or pre_checkout_query.currency != "XTR":
+        await bot.answer_pre_checkout_query(
+            pre_checkout_query.id, ok=False, error_message="החשבונית אינה בתוקף. בקש חשבונית חדשה מהבוט."
+        )
+        return
+    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+
+
+@dp.message_handler(content_types=types.ContentType.SUCCESSFUL_PAYMENT)
+async def process_successful_payment(message: types.Message):
+    payment = message.successful_payment
+    user_id = str(message.from_user.id)
+    if payment.invoice_payload != STARS_PAYLOAD or payment.currency != "XTR":
+        logging.error("Unexpected payment from %s: %s", user_id, payment)
+        return
+
+    charge_id = payment.telegram_payment_charge_id
+    expiry = await set_user_premium(user_id, f"stars:{charge_id}", days=VIP_DAYS, extend=True)
+    await update_user_data(user_id, {"last_stars_charge_id": charge_id})
+    logging.info("Stars payment: user %s paid %s XTR, charge %s", user_id, payment.total_amount, charge_id)
+    await bot.send_message(
+        message.chat.id,
+        f"🎊 <b>VIP הופעל!</b>\nתוקף: {expiry}\nאפשר להפיק שורות ללא הגבלה. בהצלחה! 🍀",
+        parse_mode="HTML",
+    )
+    await show_main_menu(message.chat.id, message.from_user.first_name)
 
 
 @dp.callback_query_handler(lambda c: c.data == "show_pay")
