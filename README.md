@@ -1,6 +1,25 @@
 # lottoBot
 lotto bot 
 
+## Python version
+
+`aiogram==2.25.1` requires `aiohttp<3.9`, which does not build on Python 3.12+. The `.python-version` file pins Render to Python 3.11.
+
+## אחסון חינמי (מומלץ)
+
+1. **שרת: Render, Free Web Service** (מה שכבר מוגדר). הבוט עובד ב-webhook, כך שגם אם השרת נרדם אחרי 15 דקות בלי פעילות, הודעה מטלגרם מעירה אותו.
+2. **מסד נתונים: Neon, Postgres חינמי** (https://neon.tech). פותחים פרויקט, מעתיקים את ה-Connection string ומגדירים אותו ב-Render כמשתנה `DATABASE_URL`. בלי זה המשתמשים ומנויי ה-VIP נמחקים בכל ריסטארט.
+3. **השארת השרת ער: UptimeRobot** (https://uptimerobot.com, חינם). מגדירים בדיקת HTTP כל 5 דקות לכתובת `https://your-service.onrender.com/`. ב-Render יש 750 שעות חינם בחודש, מספיק לשרת אחד שפועל 24/7.
+
+- `VIP_STARS_PRICE` - price of 31 days VIP in Telegram Stars (default `150`). Stars payments need no provider token; admins can refund with `/refundstars <user_id>`.
+- `DATABASE_URL` - Postgres connection string (Neon / Supabase). Without it a local SQLite file is used.
+  For Supabase use the **Session pooler** URI (Render has no IPv6, the direct `db.<ref>.supabase.co` host will not connect).
+- `CHANNEL_ID` - optional Telegram channel (e.g. `@LottoAI_IL`) where the bot is an admin; it posts 2 free lines before draws.
+- `CHANNEL_POST_TIMES` - Israel-time schedule for channel posts, default `tue 10:00,fri 12:00`.
+
+Admin commands: `/stats` (funnel and traffic sources), `/postnow` (post to the channel now), `/users`, `/userstatus`, `/grantvip`, `/revokevip`, `/refundstars`.
+Use `https://t.me/<bot>?start=src_<name>` links per marketing channel (e.g. `src_tiktok`) so `/stats` shows where users came from.
+
 ## Render environment variables
 
 Set these variables in Render before deploying:

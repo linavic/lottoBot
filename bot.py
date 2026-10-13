@@ -1,8 +1,11 @@
 import asyncio
 import base64
+import html
 import logging
 import os
 import random
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, types
 from aiohttp import ClientSession, web
@@ -11,8 +14,10 @@ from dotenv import load_dotenv
 from database_manager import (
     award_referral_credit,
     get_all_users,
+    get_setting,
     get_user_data,
     set_referrer,
+    set_setting,
     set_user_premium,
     update_user_data,
     use_free_credit,
@@ -37,35 +42,56 @@ ADMIN_IDS = {
     if admin_id.strip()
 }
 PORT = int(os.environ.get("PORT", 8080))
+VIP_STARS_PRICE = int(os.getenv("VIP_STARS_PRICE", "150"))
+VIP_DAYS = 31
+STARS_PAYLOAD = "vip_stars_31d"
+# ערוץ שהבוט מנהל בו ומפרסם אליו שורות חינם לפני הגרלות, למשל @LottoAI_IL
+CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()
+# זמני פרסום בשעון ישראל: יום (mon..sun) ושעה, מופרדים בפסיק
+CHANNEL_POST_TIMES = os.getenv("CHANNEL_POST_TIMES", "tue 10:00,fri 12:00")
+ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
+WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+BOT_DESCRIPTION = (
+    "🎰 10 שורות לוטו בלחיצה אחת!\n"
+    "כל שורה עם מספר חזק, כל השורות שונות זו מזו.\n"
+    "ההרצה הראשונה חינם. VIP ללא הגבלה בכוכבי טלגרם או ב-PayPal.\n\n"
+    "הבוט אינו קשור למפעל הפיס. שחקו באחריות."
+)
+BOT_SHORT_DESCRIPTION = "מחולל שורות לוטו: 10 שורות בלחיצה. ראשונה חינם. שחקו באחריות 🍀"
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 polling_task = None
+scheduler_task = None
 
 DISCLAIMER_TEXT = (
-    "⚠️ **כתב ויתור אחריות ותנאי שימוש** ⚠️\n\n"
-    "1. השימוש בבוט ובמידע המופק ממנו הוא על אחריות המשתמש בלבד.\n"
-    "2. המידע הוא המלצה סטטיסטית בלבד ואינו מבטיח זכייה.\n"
-    "3. הבוט ומפתחיו אינם נושאים באחריות לנזק כספי.\n"
-    "**המשך השימוש מהווה הסכמה לתנאים אלו.**"
+    "⚠️ <b>לפני שמתחילים</b>\n\n"
+    "1. הבוט מגריל שורות באקראיות מלאה. אף שיטה לא יכולה לחזות תוצאות הגרלה או להגדיל את סיכויי הזכייה.\n"
+    "2. הבוט אינו קשור למפעל הפיס.\n"
+    "3. השימוש על אחריותך. שחק באחריות ורק בסכומים שאתה יכול להרשות לעצמך.\n\n"
+    "<b>לחיצה על האישור מהווה הסכמה לתנאים.</b>"
 )
 
 MARKETING_STORY = (
-    "🔬 **הטכנולוגיה שמאחורי המזל**\n\n"
-    "מערכת **LottoAI** פותחה על ידי צוות מומחי דאטה.\n"
-    "האלגוריתם סורק אלפי הגרלות עבר ומזהה דפוסים סטטיסטיים\n"
-    "כדי לזקק את הצירופים בעלי הפוטנציאל הגבוה ביותר."
+    "🍀 <b>LottoAI – מחולל שורות לוטו</b>\n\n"
+    "בלי לשבור את הראש על מספרים: לחיצה אחת ומקבלים 10 שורות מוכנות למילוי, "
+    "כל אחת עם מספר חזק.\n"
+    "השורות שונות זו מזו ונבחרות באקראיות מלאה, בדיוק כמו ההגרלה עצמה."
 )
+
+VIP_PRICE_TEXT = '10 ש"ח לחודש'
 
 
 def generate_numbers():
+    rng = random.SystemRandom()
     lines = []
-    for _ in range(10):
-        nums = sorted(random.sample(range(1, 38), 6))
-        strong = random.randint(1, 7)
-        lines.append(nums + [strong])
+    while len(lines) < 10:
+        line = sorted(rng.sample(range(1, 38), 6)) + [rng.randint(1, 7)]
+        if line not in lines:
+            lines.append(line)
     return lines
 
 
@@ -74,7 +100,15 @@ def is_admin(user_id):
 
 
 def is_premium_active(user):
-    return bool(user.get("is_premium", False))
+    if not user.get("is_premium", False):
+        return False
+    expiry = user.get("expiry_date")
+    if not expiry:
+        return True
+    try:
+        return datetime.strptime(expiry, "%Y-%m-%d %H:%M:%S") > datetime.now()
+    except ValueError:
+        return True
 
 
 async def get_paypal_access_token():
@@ -172,10 +206,17 @@ async def send_share_prompt(user_id):
 async def send_welcome(message: types.Message):
     user_id = str(message.from_user.id)
     args = message.get_args()
+    user = await get_user_data(user_id)
     if args.startswith("ref_"):
         await set_referrer(user_id, args.replace("ref_", "", 1))
-
-    user = await get_user_data(user_id)
+    if not user.get("source") and not user.get("agreed_to_terms"):
+        if args.startswith("ref_"):
+            source = "referral"
+        elif args.startswith("src_"):
+            source = args[4:40] or "direct"
+        else:
+            source = "direct"
+        await update_user_data(user_id, {"source": source})
     await update_user_data(
         user_id,
         {
@@ -194,7 +235,7 @@ async def send_welcome(message: types.Message):
             message.chat.id,
             welcome_img,
             caption=DISCLAIMER_TEXT,
-            parse_mode="Markdown",
+            parse_mode="HTML",
             reply_markup=keyboard,
         )
     else:
@@ -208,6 +249,51 @@ async def show_whoami(message: types.Message):
     await bot.send_message(
         message.chat.id,
         f"Telegram ID שלך: <code>{user_id}</code>\nמזוהה כאדמין: <b>{admin_status}</b>",
+        parse_mode="HTML",
+    )
+
+
+@dp.message_handler(commands=["paysupport"])
+async def pay_support(message: types.Message):
+    await bot.send_message(
+        message.chat.id,
+        "💬 <b>תמיכה בתשלומים</b>\n\n"
+        "בעיה בתשלום או בהפעלת VIP? כתוב כאן בהודעה אחת מה קרה, "
+        "ואנחנו נחזור אליך תוך 48 שעות. החזר כספי על תשלום בכוכבים אפשרי תוך 14 יום מהרכישה.",
+        parse_mode="HTML",
+    )
+
+
+@dp.message_handler(commands=["refundstars"])
+async def refund_stars(message: types.Message):
+    if not is_admin(message.from_user.id):
+        await bot.send_message(message.chat.id, "אין לך הרשאה לבצע פעולה זו.")
+        return
+
+    target_user_id = message.get_args().strip()
+    if not target_user_id.isdigit():
+        await bot.send_message(message.chat.id, "שימוש נכון: /refundstars 123456789")
+        return
+
+    user = await get_user_data(target_user_id)
+    charge_id = user.get("last_stars_charge_id")
+    if not charge_id:
+        await bot.send_message(message.chat.id, "למשתמש הזה אין תשלום בכוכבים שמור.")
+        return
+
+    try:
+        await bot.request(
+            "refundStarPayment",
+            {"user_id": int(target_user_id), "telegram_payment_charge_id": charge_id},
+        )
+    except Exception as e:
+        await bot.send_message(message.chat.id, f"ההחזר נכשל: {html.escape(str(e))}")
+        return
+
+    await update_user_data(target_user_id, {"is_premium": False, "last_stars_charge_id": None})
+    await bot.send_message(
+        message.chat.id,
+        f"הכוכבים הוחזרו למשתמש <code>{target_user_id}</code> וה-VIP בוטל.",
         parse_mode="HTML",
     )
 
@@ -284,6 +370,61 @@ async def user_status(message: types.Message):
     )
 
 
+@dp.message_handler(commands=["stats"])
+async def show_stats(message: types.Message):
+    if not is_admin(message.from_user.id):
+        await bot.send_message(message.chat.id, "אין לך הרשאה לבצע פעולה זו.")
+        return
+
+    users = await get_all_users()
+    week_ago = datetime.now() - timedelta(days=7)
+    total = len(users)
+    agreed = sum(1 for u in users.values() if u.get("agreed_to_terms"))
+    used_free = sum(1 for u in users.values() if u.get("has_used_free"))
+    vip = sum(1 for u in users.values() if is_premium_active(u))
+    stars_buyers = sum(1 for u in users.values() if str(u.get("subscription_id") or "").startswith("stars:"))
+    new_week = 0
+    sources = {}
+    for u in users.values():
+        sources[u.get("source") or "לא ידוע"] = sources.get(u.get("source") or "לא ידוע", 0) + 1
+        try:
+            if datetime.strptime(u.get("joined_at") or "", "%Y-%m-%d %H:%M:%S") > week_ago:
+                new_week += 1
+        except ValueError:
+            pass
+
+    source_lines = "\n".join(
+        f"  {html.escape(name)}: {count}" for name, count in sorted(sources.items(), key=lambda x: -x[1])
+    )
+    await bot.send_message(
+        message.chat.id,
+        (
+            "📊 <b>סטטיסטיקה</b>\n\n"
+            f"משתמשים: <b>{total}</b> (חדשים השבוע: {new_week})\n"
+            f"אישרו תנאים: <b>{agreed}</b>\n"
+            f"הפיקו הגרלה חינמית: <b>{used_free}</b>\n"
+            f"VIP פעילים: <b>{vip}</b> (מתוכם שילמו בכוכבים: {stars_buyers})\n\n"
+            f"<b>מקורות הגעה:</b>\n{source_lines}"
+        ),
+        parse_mode="HTML",
+    )
+
+
+@dp.message_handler(commands=["postnow"])
+async def post_now(message: types.Message):
+    if not is_admin(message.from_user.id):
+        await bot.send_message(message.chat.id, "אין לך הרשאה לבצע פעולה זו.")
+        return
+    if not CHANNEL_ID:
+        await bot.send_message(message.chat.id, "לא הוגדר CHANNEL_ID ב-Render.")
+        return
+    try:
+        await post_to_channel()
+        await bot.send_message(message.chat.id, "✅ פורסם בערוץ.")
+    except Exception as e:
+        await bot.send_message(message.chat.id, f"הפרסום נכשל: {html.escape(str(e))}")
+
+
 @dp.message_handler(commands=["users"])
 async def list_users(message: types.Message):
     if not is_admin(message.from_user.id):
@@ -326,13 +467,13 @@ async def list_users(message: types.Message):
 
 
 async def show_main_menu(chat_id, name):
-    text = f"שלום {name}! 🎰\n\n{MARKETING_STORY}\n\nהאלגוריתם מוכן. מה תרצה לעשות?"
+    text = f"שלום {html.escape(name or '')}! 🎰\n\n{MARKETING_STORY}\n\nמה תרצה לעשות?"
     keyboard = types.InlineKeyboardMarkup(row_width=1).add(
         types.InlineKeyboardButton("🎰 הפק 10 שורות חינם", callback_data="get_lotto"),
         types.InlineKeyboardButton("💳 הצטרף למנוי VIP", callback_data="show_pay"),
         types.InlineKeyboardButton("🎁 הזמן חבר וקבל הגרלה חינמית", callback_data="share_friend"),
     )
-    await bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=keyboard)
+    await bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=keyboard)
 
 
 @dp.callback_query_handler(lambda c: c.data == "agree_terms")
@@ -362,16 +503,17 @@ async def process_lotto(callback_query: types.CallbackQuery):
             else:
                 await update_user_data(user_id, {"has_used_free": True})
 
-        text = "🎰 **התחזית האלגוריתמית עבורך:**\n\n"
+        text = "🎰 <b>10 השורות שלך:</b>\n\n"
         for i, row in enumerate(results, 1):
             nums = "  ".join([f"<b>{n}</b>" for n in row[:-1]])
             text += f"{i}. {nums} | ⭐ <b>{row[-1]}</b>\n"
 
+        text += "\nבהצלחה! 🍀"
         await bot.send_message(user_id, text, parse_mode="HTML")
 
         if not unlimited_allowed:
             await asyncio.sleep(2)
-            promo = '🧐 רוצה תחזיות ללא הגבלה? הצטרף ל-VIP ב-10 ש"ח בלבד!'
+            promo = f"🔓 רוצה שורות ללא הגבלה לכל הגרלה? VIP ב-{VIP_STARS_PRICE} כוכבי טלגרם או ב-{VIP_PRICE_TEXT} ב-PayPal."
             keyboard = types.InlineKeyboardMarkup().add(
                 types.InlineKeyboardButton("💳 למנוי VIP", callback_data="show_pay")
             )
@@ -383,25 +525,69 @@ async def process_lotto(callback_query: types.CallbackQuery):
 
 async def show_payment_options(user_id):
     url = await create_paypal_subscription(user_id)
-    if not url:
-        await bot.send_message(
-            user_id,
-            "לא ניתן לפתוח כרגע קישור תשלום. אנא נסה שוב בעוד כמה דקות או פנה לתמיכה.",
-        )
-        return
 
     text = (
-        "🛑 **מגבלת שימוש חינמי**\n\n"
-        "כבר ניצלת את התחזית החינמית. הצטרף ל-VIP כדי להמשיך ללא הגבלה."
+        "🔓 <b>VIP – שורות ללא הגבלה</b>\n\n"
+        f"⭐ <b>{VIP_STARS_PRICE} כוכבי טלגרם</b> ל-{VIP_DAYS} יום. תשלום בתוך טלגרם, בלי חידוש אוטומטי.\n"
     )
-    keyboard = types.InlineKeyboardMarkup().add(
-        types.InlineKeyboardButton('💳 מנוי VIP ב-10 ש"ח', url=url)
+    keyboard = types.InlineKeyboardMarkup(row_width=1).add(
+        types.InlineKeyboardButton(f"⭐ VIP ב-{VIP_STARS_PRICE} כוכבים", callback_data="pay_stars"),
     )
-    await bot.send_message(user_id, text, reply_markup=keyboard, parse_mode="Markdown")
+    if url:
+        text += f"💳 <b>PayPal</b>: מנוי ב-{VIP_PRICE_TEXT}, מתחדש אוטומטית, ביטול בכל עת.\n"
+        keyboard.add(types.InlineKeyboardButton(f"💳 PayPal ב-{VIP_PRICE_TEXT}", url=url))
+    text += "\nאו: הזמן חבר וקבל הגרלה חינמית נוספת."
+    keyboard.add(types.InlineKeyboardButton("🎁 הזמן חבר וקבל הגרלה", callback_data="share_friend"))
+    await bot.send_message(user_id, text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@dp.callback_query_handler(lambda c: c.data == "pay_stars")
+async def callback_pay_stars(callback_query: types.CallbackQuery):
+    await bot.answer_callback_query(callback_query.id)
+    await bot.send_invoice(
+        callback_query.from_user.id,
+        title=f"LottoAI VIP – {VIP_DAYS} יום",
+        description="הגרלת שורות לוטו ללא הגבלה. בלי חידוש אוטומטי.",
+        payload=STARS_PAYLOAD,
+        provider_token="",
+        currency="XTR",
+        prices=[types.LabeledPrice(label=f"VIP {VIP_DAYS} יום", amount=VIP_STARS_PRICE)],
+    )
+
+
+@dp.pre_checkout_query_handler(lambda q: True)
+async def process_pre_checkout(pre_checkout_query: types.PreCheckoutQuery):
+    if pre_checkout_query.invoice_payload != STARS_PAYLOAD or pre_checkout_query.currency != "XTR":
+        await bot.answer_pre_checkout_query(
+            pre_checkout_query.id, ok=False, error_message="החשבונית אינה בתוקף. בקש חשבונית חדשה מהבוט."
+        )
+        return
+    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+
+
+@dp.message_handler(content_types=types.ContentType.SUCCESSFUL_PAYMENT)
+async def process_successful_payment(message: types.Message):
+    payment = message.successful_payment
+    user_id = str(message.from_user.id)
+    if payment.invoice_payload != STARS_PAYLOAD or payment.currency != "XTR":
+        logging.error("Unexpected payment from %s: %s", user_id, payment)
+        return
+
+    charge_id = payment.telegram_payment_charge_id
+    expiry = await set_user_premium(user_id, f"stars:{charge_id}", days=VIP_DAYS, extend=True)
+    await update_user_data(user_id, {"last_stars_charge_id": charge_id})
+    logging.info("Stars payment: user %s paid %s XTR, charge %s", user_id, payment.total_amount, charge_id)
+    await bot.send_message(
+        message.chat.id,
+        f"🎊 <b>VIP הופעל!</b>\nתוקף: {expiry}\nאפשר להפיק שורות ללא הגבלה. בהצלחה! 🍀",
+        parse_mode="HTML",
+    )
+    await show_main_menu(message.chat.id, message.from_user.first_name)
 
 
 @dp.callback_query_handler(lambda c: c.data == "show_pay")
 async def callback_pay(callback_query: types.CallbackQuery):
+    await bot.answer_callback_query(callback_query.id)
     await show_payment_options(callback_query.from_user.id)
 
 
@@ -409,6 +595,72 @@ async def callback_pay(callback_query: types.CallbackQuery):
 async def callback_share(callback_query: types.CallbackQuery):
     await bot.answer_callback_query(callback_query.id)
     await send_share_prompt(callback_query.from_user.id)
+
+
+async def get_bot_username():
+    if BOT_USERNAME:
+        return BOT_USERNAME
+    me = await bot.get_me()
+    return me.username
+
+
+async def post_to_channel():
+    lines = generate_numbers()[:2]
+    text = "🍀 <b>שורות חינם להגרלה הקרובה</b>\n\n"
+    for i, row in enumerate(lines, 1):
+        nums = " · ".join(str(n) for n in row[:-1])
+        text += f"{i}. {nums} | ⭐ {row[-1]}\n"
+    text += "\nרוצים 10 שורות משלכם? לחיצה אחת בבוט 👇\nשחקו באחריות."
+    bot_link = f"https://t.me/{await get_bot_username()}?start=src_channel"
+    keyboard = types.InlineKeyboardMarkup().add(
+        types.InlineKeyboardButton("🎰 קבל 10 שורות חינם", url=bot_link)
+    )
+    await bot.send_message(CHANNEL_ID, text, parse_mode="HTML", reply_markup=keyboard)
+
+
+def parse_post_times():
+    slots = []
+    for part in CHANNEL_POST_TIMES.split(","):
+        try:
+            day, clock = part.strip().lower().split()
+            hour, minute = (int(x) for x in clock.split(":"))
+            slots.append((WEEKDAYS.index(day[:3]), hour, minute))
+        except ValueError:
+            logging.warning("Bad CHANNEL_POST_TIMES entry: %r", part)
+    return slots
+
+
+async def channel_scheduler():
+    slots = parse_post_times()
+    logging.info("Channel posts to %s at %s (Israel time)", CHANNEL_ID, CHANNEL_POST_TIMES)
+    while True:
+        now = datetime.now(ISRAEL_TZ)
+        for weekday, hour, minute in slots:
+            slot_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if now.weekday() != weekday or not slot_time <= now < slot_time + timedelta(minutes=60):
+                continue
+            slot_key = slot_time.strftime("%Y-%m-%d %H:%M")
+            if await get_setting("last_channel_post") == slot_key:
+                continue
+            try:
+                await post_to_channel()
+                await set_setting("last_channel_post", slot_key)
+                logging.info("Posted to channel for slot %s", slot_key)
+            except Exception as e:
+                logging.error("Channel post failed: %s", e)
+        await asyncio.sleep(60)
+
+
+async def setup_bot_profile():
+    try:
+        await bot.set_my_commands([
+            types.BotCommand("start", "התחל / תפריט ראשי"),
+            types.BotCommand("paysupport", "תמיכה בתשלומים"),
+        ])
+        await bot.request("setMyDescription", {"description": BOT_DESCRIPTION})
+        await bot.request("setMyShortDescription", {"short_description": BOT_SHORT_DESCRIPTION})
+    except Exception as e:
+        logging.warning("Could not update bot profile: %s", e)
 
 
 async def handle_home(request):
@@ -449,8 +701,8 @@ async def handle_paypal_webhook(request):
             expiry = await set_user_premium(user_id, resource.get("id"))
             await bot.send_message(
                 user_id,
-                f"🎊 **מנוי VIP הופעל!**\nתוקף: {expiry}\nבהצלחה! 🍀",
-                parse_mode="Markdown",
+                f"🎊 <b>מנוי VIP הופעל!</b>\nתוקף: {expiry}\nבהצלחה! 🍀",
+                parse_mode="HTML",
             )
         elif user_id and event_type in [
             "BILLING.SUBSCRIPTION.CANCELLED",
@@ -466,7 +718,10 @@ async def handle_paypal_webhook(request):
 
 
 async def on_startup(app):
-    global polling_task
+    global polling_task, scheduler_task
+    await setup_bot_profile()
+    if CHANNEL_ID:
+        scheduler_task = asyncio.create_task(channel_scheduler())
     should_use_webhook = USE_TELEGRAM_WEBHOOK == "true" or (
         USE_TELEGRAM_WEBHOOK == "auto" and bool(PUBLIC_BASE_URL)
     )
@@ -486,6 +741,8 @@ async def on_startup(app):
 
 async def on_shutdown(app):
     global polling_task
+    if scheduler_task:
+        scheduler_task.cancel()
     if polling_task:
         polling_task.cancel()
         try:
