@@ -1,8 +1,16 @@
-import os
 import json
+import logging
+import os
 from datetime import datetime, timedelta
 
-DB_FILE = "users_db.json"
+from sqlalchemy import Column, String, Text, create_engine, select
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+# אחסון המשתמשים.
+# אם מוגדר DATABASE_URL (למשל Postgres חינמי ב-Neon או Supabase) הנתונים נשמרים שם
+# ולא נמחקים בריסטארט. בלי DATABASE_URL נוצר קובץ SQLite מקומי לבדיקות.
+
+LEGACY_JSON_FILE = "users_db.json"
 
 DEFAULT_USER = {
     "agreed_to_terms": False,
@@ -15,63 +23,112 @@ DEFAULT_USER = {
     "referral_awarded": False,
     "first_name": None,
     "last_name": None,
-    "username": None
+    "username": None,
 }
+
+DATABASE_URL = os.getenv("DATABASE_URL") or "sqlite:///./local_test.db"
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+Base = declarative_base()
+
+
+class UserRecord(Base):
+    __tablename__ = "lotto_users"
+    user_id = Column(String(32), primary_key=True)
+    data = Column(Text, nullable=False, default="{}")
+
+
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+SessionLocal = sessionmaker(bind=engine, autoflush=False)
+Base.metadata.create_all(bind=engine)
+
+
+def _load(session, user_id):
+    record = session.get(UserRecord, user_id)
+    if record is None:
+        return None, None
+    try:
+        return record, json.loads(record.data)
+    except json.JSONDecodeError:
+        return record, {}
+
+
+def _import_legacy_json():
+    """מעביר משתמשים מקובץ users_db.json הישן, פעם אחת, אם הטבלה ריקה."""
+    if not os.path.exists(LEGACY_JSON_FILE):
+        return
+    with SessionLocal() as session:
+        if session.execute(select(UserRecord.user_id).limit(1)).first():
+            return
+        try:
+            with open(LEGACY_JSON_FILE, "r", encoding="utf-8") as f:
+                legacy = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return
+        for user_id, user in legacy.items():
+            session.add(UserRecord(user_id=str(user_id), data=json.dumps(user, ensure_ascii=False)))
+        session.commit()
+        logging.info("Imported %s users from %s", len(legacy), LEGACY_JSON_FILE)
+
+
+_import_legacy_json()
+
 
 async def get_user_data(user_id):
     user_id = str(user_id)
-    if not os.path.exists(DB_FILE):
-        with open(DB_FILE, 'w', encoding='utf-8') as f:
-            json.dump({}, f)
-    try:
-        with open(DB_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-    except:
-        data = {}
-    
-    if user_id not in data:
-        data[user_id] = DEFAULT_USER.copy()
-        save_db(data)
-    else:
+    with SessionLocal() as session:
+        record, data = _load(session, user_id)
+        if record is None:
+            data = DEFAULT_USER.copy()
+            session.add(UserRecord(user_id=user_id, data=json.dumps(data, ensure_ascii=False)))
+            session.commit()
+            return data
+
         missing_defaults = False
         for key, value in DEFAULT_USER.items():
-            if key not in data[user_id]:
-                data[user_id][key] = value
+            if key not in data:
+                data[key] = value
                 missing_defaults = True
         if missing_defaults:
-            save_db(data)
-    return data[user_id]
+            record.data = json.dumps(data, ensure_ascii=False)
+            session.commit()
+        return data
+
 
 async def user_agreed_to_terms(user_id):
-    user_id = str(user_id)
     await update_user_data(user_id, {"agreed_to_terms": True})
+
 
 async def update_user_data(user_id, updates):
     user_id = str(user_id)
-    try:
-        with open(DB_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-    except:
-        data = {}
-    if user_id not in data:
-        data[user_id] = {}
-    data[user_id].update(updates)
-    save_db(data)
+    with SessionLocal() as session:
+        record, data = _load(session, user_id)
+        if record is None:
+            data = DEFAULT_USER.copy()
+            record = UserRecord(user_id=user_id)
+            session.add(record)
+        data.update(updates)
+        record.data = json.dumps(data, ensure_ascii=False)
+        session.commit()
+
 
 async def get_all_users():
-    if not os.path.exists(DB_FILE):
-        return {}
-    try:
-        with open(DB_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-    except:
-        return {}
-    return data
+    with SessionLocal() as session:
+        users = {}
+        for record in session.execute(select(UserRecord)).scalars():
+            try:
+                users[record.user_id] = json.loads(record.data)
+            except json.JSONDecodeError:
+                users[record.user_id] = {}
+        return users
+
 
 async def set_user_premium(user_id, sub_id=None):
     expiry = (datetime.now() + timedelta(days=31)).strftime("%Y-%m-%d %H:%M:%S")
     await update_user_data(user_id, {"is_premium": True, "expiry_date": expiry, "subscription_id": sub_id})
     return expiry
+
 
 async def set_referrer(user_id, referrer_id):
     user_id = str(user_id)
@@ -86,6 +143,7 @@ async def set_referrer(user_id, referrer_id):
     await update_user_data(user_id, {"referred_by": referrer_id})
     return True
 
+
 async def award_referral_credit(user_id):
     user_id = str(user_id)
     user = await get_user_data(user_id)
@@ -99,6 +157,7 @@ async def award_referral_credit(user_id):
     await update_user_data(user_id, {"referral_awarded": True})
     return referrer_id
 
+
 async def use_free_credit(user_id):
     user_id = str(user_id)
     user = await get_user_data(user_id)
@@ -108,7 +167,3 @@ async def use_free_credit(user_id):
 
     await update_user_data(user_id, {"free_credits": credits - 1})
     return True
-
-def save_db(data):
-    with open(DB_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)

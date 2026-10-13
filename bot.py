@@ -1,8 +1,10 @@
 import asyncio
 import base64
+import html
 import logging
 import os
 import random
+from datetime import datetime
 
 from aiogram import Bot, Dispatcher, types
 from aiohttp import ClientSession, web
@@ -45,27 +47,30 @@ dp = Dispatcher(bot)
 polling_task = None
 
 DISCLAIMER_TEXT = (
-    "⚠️ **כתב ויתור אחריות ותנאי שימוש** ⚠️\n\n"
-    "1. השימוש בבוט ובמידע המופק ממנו הוא על אחריות המשתמש בלבד.\n"
-    "2. המידע הוא המלצה סטטיסטית בלבד ואינו מבטיח זכייה.\n"
-    "3. הבוט ומפתחיו אינם נושאים באחריות לנזק כספי.\n"
-    "**המשך השימוש מהווה הסכמה לתנאים אלו.**"
+    "⚠️ <b>לפני שמתחילים</b>\n\n"
+    "1. הבוט מגריל שורות באקראיות מלאה. אף שיטה לא יכולה לחזות תוצאות הגרלה או להגדיל את סיכויי הזכייה.\n"
+    "2. הבוט אינו קשור למפעל הפיס.\n"
+    "3. השימוש על אחריותך. שחק באחריות ורק בסכומים שאתה יכול להרשות לעצמך.\n\n"
+    "<b>לחיצה על האישור מהווה הסכמה לתנאים.</b>"
 )
 
 MARKETING_STORY = (
-    "🔬 **הטכנולוגיה שמאחורי המזל**\n\n"
-    "מערכת **LottoAI** פותחה על ידי צוות מומחי דאטה.\n"
-    "האלגוריתם סורק אלפי הגרלות עבר ומזהה דפוסים סטטיסטיים\n"
-    "כדי לזקק את הצירופים בעלי הפוטנציאל הגבוה ביותר."
+    "🍀 <b>LottoAI – מחולל שורות לוטו</b>\n\n"
+    "בלי לשבור את הראש על מספרים: לחיצה אחת ומקבלים 10 שורות מוכנות למילוי, "
+    "כל אחת עם מספר חזק.\n"
+    "השורות שונות זו מזו ונבחרות באקראיות מלאה, בדיוק כמו ההגרלה עצמה."
 )
+
+VIP_PRICE_TEXT = '10 ש"ח לחודש'
 
 
 def generate_numbers():
+    rng = random.SystemRandom()
     lines = []
-    for _ in range(10):
-        nums = sorted(random.sample(range(1, 38), 6))
-        strong = random.randint(1, 7)
-        lines.append(nums + [strong])
+    while len(lines) < 10:
+        line = sorted(rng.sample(range(1, 38), 6)) + [rng.randint(1, 7)]
+        if line not in lines:
+            lines.append(line)
     return lines
 
 
@@ -74,7 +79,15 @@ def is_admin(user_id):
 
 
 def is_premium_active(user):
-    return bool(user.get("is_premium", False))
+    if not user.get("is_premium", False):
+        return False
+    expiry = user.get("expiry_date")
+    if not expiry:
+        return True
+    try:
+        return datetime.strptime(expiry, "%Y-%m-%d %H:%M:%S") > datetime.now()
+    except ValueError:
+        return True
 
 
 async def get_paypal_access_token():
@@ -194,7 +207,7 @@ async def send_welcome(message: types.Message):
             message.chat.id,
             welcome_img,
             caption=DISCLAIMER_TEXT,
-            parse_mode="Markdown",
+            parse_mode="HTML",
             reply_markup=keyboard,
         )
     else:
@@ -326,13 +339,13 @@ async def list_users(message: types.Message):
 
 
 async def show_main_menu(chat_id, name):
-    text = f"שלום {name}! 🎰\n\n{MARKETING_STORY}\n\nהאלגוריתם מוכן. מה תרצה לעשות?"
+    text = f"שלום {html.escape(name or '')}! 🎰\n\n{MARKETING_STORY}\n\nמה תרצה לעשות?"
     keyboard = types.InlineKeyboardMarkup(row_width=1).add(
         types.InlineKeyboardButton("🎰 הפק 10 שורות חינם", callback_data="get_lotto"),
         types.InlineKeyboardButton("💳 הצטרף למנוי VIP", callback_data="show_pay"),
         types.InlineKeyboardButton("🎁 הזמן חבר וקבל הגרלה חינמית", callback_data="share_friend"),
     )
-    await bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=keyboard)
+    await bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=keyboard)
 
 
 @dp.callback_query_handler(lambda c: c.data == "agree_terms")
@@ -362,16 +375,17 @@ async def process_lotto(callback_query: types.CallbackQuery):
             else:
                 await update_user_data(user_id, {"has_used_free": True})
 
-        text = "🎰 **התחזית האלגוריתמית עבורך:**\n\n"
+        text = "🎰 <b>10 השורות שלך:</b>\n\n"
         for i, row in enumerate(results, 1):
             nums = "  ".join([f"<b>{n}</b>" for n in row[:-1]])
             text += f"{i}. {nums} | ⭐ <b>{row[-1]}</b>\n"
 
+        text += "\nבהצלחה! 🍀"
         await bot.send_message(user_id, text, parse_mode="HTML")
 
         if not unlimited_allowed:
             await asyncio.sleep(2)
-            promo = '🧐 רוצה תחזיות ללא הגבלה? הצטרף ל-VIP ב-10 ש"ח בלבד!'
+            promo = f"🔓 רוצה שורות ללא הגבלה לכל הגרלה? מנוי VIP ב-{VIP_PRICE_TEXT}, ביטול בכל עת."
             keyboard = types.InlineKeyboardMarkup().add(
                 types.InlineKeyboardButton("💳 למנוי VIP", callback_data="show_pay")
             )
@@ -391,17 +405,20 @@ async def show_payment_options(user_id):
         return
 
     text = (
-        "🛑 **מגבלת שימוש חינמי**\n\n"
-        "כבר ניצלת את התחזית החינמית. הצטרף ל-VIP כדי להמשיך ללא הגבלה."
+        "🛑 <b>ההגרלות החינמיות נוצלו</b>\n\n"
+        "אפשר להזמין חבר ולקבל הגרלה נוספת, או להצטרף ל-VIP "
+        f"ולקבל שורות ללא הגבלה ב-{VIP_PRICE_TEXT}. ביטול בכל עת דרך PayPal."
     )
-    keyboard = types.InlineKeyboardMarkup().add(
-        types.InlineKeyboardButton('💳 מנוי VIP ב-10 ש"ח', url=url)
+    keyboard = types.InlineKeyboardMarkup(row_width=1).add(
+        types.InlineKeyboardButton(f"💳 מנוי VIP ב-{VIP_PRICE_TEXT}", url=url),
+        types.InlineKeyboardButton("🎁 הזמן חבר וקבל הגרלה", callback_data="share_friend"),
     )
-    await bot.send_message(user_id, text, reply_markup=keyboard, parse_mode="Markdown")
+    await bot.send_message(user_id, text, reply_markup=keyboard, parse_mode="HTML")
 
 
 @dp.callback_query_handler(lambda c: c.data == "show_pay")
 async def callback_pay(callback_query: types.CallbackQuery):
+    await bot.answer_callback_query(callback_query.id)
     await show_payment_options(callback_query.from_user.id)
 
 
@@ -449,8 +466,8 @@ async def handle_paypal_webhook(request):
             expiry = await set_user_premium(user_id, resource.get("id"))
             await bot.send_message(
                 user_id,
-                f"🎊 **מנוי VIP הופעל!**\nתוקף: {expiry}\nבהצלחה! 🍀",
-                parse_mode="Markdown",
+                f"🎊 <b>מנוי VIP הופעל!</b>\nתוקף: {expiry}\nבהצלחה! 🍀",
+                parse_mode="HTML",
             )
         elif user_id and event_type in [
             "BILLING.SUBSCRIPTION.CANCELLED",

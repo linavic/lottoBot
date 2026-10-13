@@ -4,3 +4,5 @@ aiohttp
 pandas
 openpyxl
 requests
+SQLAlchemy>=2.0,<3
+psycopg2-binary
